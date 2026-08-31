@@ -95,7 +95,7 @@ class UploadLockManager:
 upload_lock_manager = UploadLockManager()
 
 # -----------------------------------------------------------------------------
-# Helper Functions & LAN IP Discovery
+# Helper Functions, LAN IP Discovery & File Type Classification
 # -----------------------------------------------------------------------------
 def get_lan_ip():
     """Dynamically detects the primary LAN IP address of this machine."""
@@ -151,6 +151,146 @@ def format_bytes(size_bytes):
     p = math.pow(1024, i)
     s = round(size_bytes / p, 2)
     return f"{s} {units[i]}"
+
+def get_file_type_info(filename):
+    """
+    Returns (category, type_label, bg_class, icon_type) based on filename extension.
+    Handles case-insensitivity, multiple dots, and files without extensions.
+    """
+    if not filename:
+        return {
+            "category": "generic",
+            "label": "File",
+            "badge_class": "file-generic",
+            "icon": "generic"
+        }
+    
+    lower = filename.lower()
+    ext = ""
+    if lower.endswith(".tar.gz"):
+        ext = "tar.gz"
+    elif lower.endswith(".tar.bz2"):
+        ext = "tar.bz2"
+    elif lower.endswith(".tar.xz"):
+        ext = "tar.xz"
+    else:
+        parts = lower.rsplit(".", 1)
+        if len(parts) > 1:
+            ext = parts[1]
+
+    EXT_MAP = {
+        # Video
+        "mp4": ("video", "Video · MP4", "file-video", "video"),
+        "mkv": ("video", "Video · MKV", "file-video", "video"),
+        "mov": ("video", "Video · QuickTime", "file-video", "video"),
+        "avi": ("video", "Video · AVI", "file-video", "video"),
+        "webm": ("video", "Video · WebM", "file-video", "video"),
+        "flv": ("video", "Video · FLV", "file-video", "video"),
+        "wmv": ("video", "Video · WMV", "file-video", "video"),
+        "m4v": ("video", "Video · M4V", "file-video", "video"),
+        "mpeg": ("video", "Video · MPEG", "file-video", "video"),
+        "mpg": ("video", "Video · MPG", "file-video", "video"),
+        "3gp": ("video", "Video · 3GP", "file-video", "video"),
+        
+        # Audio
+        "mp3": ("audio", "Audio · MP3", "file-audio", "audio"),
+        "wav": ("audio", "Audio · WAV", "file-audio", "audio"),
+        "flac": ("audio", "Audio · FLAC", "file-audio", "audio"),
+        "aac": ("audio", "Audio · AAC", "file-audio", "audio"),
+        "m4a": ("audio", "Audio · M4A", "file-audio", "audio"),
+        "ogg": ("audio", "Audio · OGG", "file-audio", "audio"),
+        "wma": ("audio", "Audio · WMA", "file-audio", "audio"),
+        "opus": ("audio", "Audio · OPUS", "file-audio", "audio"),
+        
+        # Image
+        "jpg": ("image", "Image · JPG", "file-image", "image"),
+        "jpeg": ("image", "Image · JPEG", "file-image", "image"),
+        "png": ("image", "Image · PNG", "file-image", "image"),
+        "gif": ("image", "Image · GIF", "file-image", "image"),
+        "webp": ("image", "Image · WebP", "file-image", "image"),
+        "bmp": ("image", "Image · BMP", "file-image", "image"),
+        "svg": ("image", "Vector · SVG", "file-image", "image"),
+        "tiff": ("image", "Image · TIFF", "file-image", "image"),
+        "tif": ("image", "Image · TIF", "file-image", "image"),
+        "ico": ("image", "Icon · ICO", "file-image", "image"),
+        "avif": ("image", "Image · AVIF", "file-image", "image"),
+        
+        # PDF
+        "pdf": ("pdf", "PDF Document", "file-pdf", "pdf"),
+        
+        # Text
+        "txt": ("text", "Plain Text", "file-text", "text"),
+        "md": ("text", "Markdown Document", "file-text", "text"),
+        "markdown": ("text", "Markdown Document", "file-text", "text"),
+        "log": ("text", "Log File", "file-text", "text"),
+        
+        # Archive
+        "zip": ("archive", "ZIP Archive", "file-archive", "archive"),
+        "rar": ("archive", "RAR Archive", "file-archive", "archive"),
+        "7z": ("archive", "7Z Archive", "file-archive", "archive"),
+        "tar": ("archive", "TAR Archive", "file-archive", "archive"),
+        "gz": ("archive", "GZ Archive", "file-archive", "archive"),
+        "bz2": ("archive", "BZ2 Archive", "file-archive", "archive"),
+        "xz": ("archive", "XZ Archive", "file-archive", "archive"),
+        "tar.gz": ("archive", "Tarball Archive", "file-archive", "archive"),
+        "tar.bz2": ("archive", "Tarball Archive", "file-archive", "archive"),
+        "tar.xz": ("archive", "Tarball Archive", "file-archive", "archive"),
+        
+        # Office / Documents
+        "doc": ("document", "Word Document", "file-doc", "doc"),
+        "docx": ("document", "Word Document", "file-doc", "doc"),
+        "xls": ("spreadsheet", "Excel Spreadsheet", "file-sheet", "sheet"),
+        "xlsx": ("spreadsheet", "Excel Spreadsheet", "file-sheet", "sheet"),
+        "csv": ("spreadsheet", "CSV Spreadsheet", "file-sheet", "sheet"),
+        "ppt": ("presentation", "PowerPoint Presentation", "file-pres", "pres"),
+        "pptx": ("presentation", "PowerPoint Presentation", "file-pres", "pres"),
+        
+        # Code / Dev
+        "html": ("code", "HTML Document", "file-code", "code"),
+        "htm": ("code", "HTML Document", "file-code", "code"),
+        "css": ("code", "CSS Stylesheet", "file-code", "code"),
+        "js": ("code", "JavaScript Source", "file-code", "code"),
+        "jsx": ("code", "React JSX Source", "file-code", "code"),
+        "ts": ("code", "TypeScript Source", "file-code", "code"),
+        "tsx": ("code", "React TSX Source", "file-code", "code"),
+        "py": ("code", "Python Script", "file-code", "code"),
+        "java": ("code", "Java Source", "file-code", "code"),
+        "cpp": ("code", "C++ Source", "file-code", "code"),
+        "c": ("code", "C Source", "file-code", "code"),
+        "h": ("code", "C/C++ Header", "file-code", "code"),
+        "hpp": ("code", "C++ Header", "file-code", "code"),
+        "go": ("code", "Go Source", "file-code", "code"),
+        "rs": ("code", "Rust Source", "file-code", "code"),
+        "php": ("code", "PHP Script", "file-code", "code"),
+        "rb": ("code", "Ruby Script", "file-code", "code"),
+        "sh": ("code", "Shell Script", "file-code", "code"),
+        "bat": ("code", "Batch Script", "file-code", "code"),
+        "ps1": ("code", "PowerShell Script", "file-code", "code"),
+        "json": ("code", "JSON File", "file-code", "code"),
+        "xml": ("code", "XML File", "file-code", "code"),
+        "yaml": ("code", "YAML File", "file-code", "code"),
+        "yml": ("code", "YAML File", "file-code", "code"),
+        "sql": ("code", "SQL Database Script", "file-code", "code"),
+        
+        # Design
+        "psd": ("design", "Photoshop Document", "file-design", "design"),
+        "ai": ("design", "Illustrator Artwork", "file-design", "design"),
+        "sketch": ("design", "Sketch Design", "file-design", "design"),
+        "fig": ("design", "Figma Design", "file-design", "design"),
+    }
+
+    if ext in EXT_MAP:
+        cat, label, bg, icon = EXT_MAP[ext]
+        return {"category": cat, "label": label, "badge_class": bg, "icon": icon}
+    
+    # Generic fallback
+    display_ext = ext.upper() if ext else "FILE"
+    return {
+        "category": "generic",
+        "label": f"File · {display_ext}" if ext else "Generic File",
+        "badge_class": "file-generic",
+        "icon": "generic"
+    }
 
 def is_valid_uuid(val):
     """Check if the value is a valid UUID string."""
@@ -325,7 +465,7 @@ if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
     cleanup_thread.start()
 
 # -----------------------------------------------------------------------------
-# Frontend HTML / UI Template (Premium Commercial Quality — Zero Emojis)
+# Frontend HTML / UI Template (Professional File-Type Icon System — Zero Emojis)
 # -----------------------------------------------------------------------------
 UPLOAD_HTML = """
 <!DOCTYPE html>
@@ -778,7 +918,7 @@ UPLOAD_HTML = """
             flex-wrap: wrap;
         }
 
-        /* Available Files Table */
+        /* Available Files Section & Professional File Icon System */
         .files-container {
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
@@ -848,7 +988,7 @@ UPLOAD_HTML = """
         }
 
         .file-table td {
-            padding: 0.8rem 1rem;
+            padding: 0.85rem 1rem;
             border-bottom: 1px solid var(--border-subtle);
             color: var(--text-primary);
             vertical-align: middle;
@@ -862,19 +1002,71 @@ UPLOAD_HTML = """
             background-color: var(--bg-surface-hover);
         }
 
+        /* Professional File Type Icon Box */
         .file-name-cell {
             display: flex;
             align-items: center;
-            gap: 0.6rem;
+            gap: 0.85rem;
             font-weight: 500;
             word-break: break-all;
         }
 
-        .file-icon {
-            color: var(--text-tertiary);
-            width: 16px;
-            height: 16px;
+        .file-icon-box {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             flex-shrink: 0;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .file-icon-box svg {
+            width: 18px;
+            height: 18px;
+            stroke-width: 1.8;
+            stroke: currentColor;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /* File Type Semantic Color Palette */
+        .file-icon-box.file-video { background: rgba(168, 85, 247, 0.12); color: #c084fc; border-color: rgba(168, 85, 247, 0.25); }
+        .file-icon-box.file-audio { background: rgba(20, 184, 166, 0.12); color: #2dd4bf; border-color: rgba(20, 184, 166, 0.25); }
+        .file-icon-box.file-image { background: rgba(59, 130, 246, 0.12); color: #60a5fa; border-color: rgba(59, 130, 246, 0.25); }
+        .file-icon-box.file-pdf { background: rgba(244, 63, 94, 0.12); color: #fb7185; border-color: rgba(244, 63, 94, 0.25); }
+        .file-icon-box.file-text { background: rgba(148, 163, 184, 0.12); color: #cbd5e1; border-color: rgba(148, 163, 184, 0.2); }
+        .file-icon-box.file-archive { background: rgba(139, 92, 246, 0.12); color: #a78bfa; border-color: rgba(139, 92, 246, 0.25); }
+        .file-icon-box.file-doc { background: rgba(37, 99, 235, 0.12); color: #93c5fd; border-color: rgba(37, 99, 235, 0.25); }
+        .file-icon-box.file-sheet { background: rgba(16, 185, 129, 0.12); color: #34d399; border-color: rgba(16, 185, 129, 0.25); }
+        .file-icon-box.file-pres { background: rgba(249, 115, 22, 0.12); color: #fb923c; border-color: rgba(249, 115, 22, 0.25); }
+        .file-icon-box.file-code { background: rgba(234, 179, 8, 0.12); color: #facc15; border-color: rgba(234, 179, 8, 0.25); }
+        .file-icon-box.file-design { background: rgba(236, 72, 153, 0.12); color: #f472b6; border-color: rgba(236, 72, 153, 0.25); }
+        .file-icon-box.file-generic { background: rgba(100, 116, 139, 0.12); color: #94a3b8; border-color: rgba(100, 116, 139, 0.2); }
+
+        .file-title-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+            min-width: 0;
+        }
+
+        .file-name-text {
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .file-type-subtext {
+            font-size: 0.76rem;
+            color: var(--text-tertiary);
+        }
+
+        .file-type-cell {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
         }
 
         .file-size-cell {
@@ -1014,13 +1206,16 @@ UPLOAD_HTML = """
             to { opacity: 1; transform: translateY(0); }
         }
 
-        /* Mobile Layout */
+        /* Mobile Responsive Adjustments */
         @media (max-width: 640px) {
             .workspace { padding: 1.5rem 1rem 3rem; gap: 2rem; }
             .btn { min-height: 42px; }
             .btn-sm { min-height: 38px; }
             
             .search-box { max-width: 100%; }
+
+            .file-icon-box { width: 34px; height: 34px; }
+            .file-icon-box svg { width: 16px; height: 16px; }
 
             .file-table, .file-table thead, .file-table tbody, .file-table th, .file-table td, .file-table tr {
                 display: block;
@@ -1038,9 +1233,11 @@ UPLOAD_HTML = """
                 border: none;
             }
 
+            .desktop-only-col { display: none; }
+
             .file-table td:last-child {
-                margin-top: 0.5rem;
-                padding-top: 0.5rem;
+                margin-top: 0.6rem;
+                padding-top: 0.4rem;
             }
 
             .file-table td:last-child .btn {
@@ -1054,6 +1251,72 @@ UPLOAD_HTML = """
     </style>
 </head>
 <body>
+
+<!-- Reusable Hidden SVG Icon Definitions -->
+<svg style="display: none;" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="icon-video" viewBox="0 0 24 24">
+        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+    </symbol>
+    <symbol id="icon-audio" viewBox="0 0 24 24">
+        <path d="M9 18V5l12-2v13"></path>
+        <circle cx="6" cy="18" r="3"></circle>
+        <circle cx="18" cy="16" r="3"></circle>
+    </symbol>
+    <symbol id="icon-image" viewBox="0 0 24 24">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+        <polyline points="21 15 16 10 5 21"></polyline>
+    </symbol>
+    <symbol id="icon-pdf" viewBox="0 0 24 24">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+        <line x1="9" y1="13" x2="15" y2="13"></line>
+        <line x1="9" y1="17" x2="13" y2="17"></line>
+    </symbol>
+    <symbol id="icon-text" viewBox="0 0 24 24">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+        <line x1="16" y1="13" x2="8" y2="13"></line>
+        <line x1="16" y1="17" x2="8" y2="17"></line>
+        <line x1="10" y1="9" x2="8" y2="9"></line>
+    </symbol>
+    <symbol id="icon-archive" viewBox="0 0 24 24">
+        <polyline points="21 8 21 21 3 21 3 8"></polyline>
+        <rect x="1" y="3" width="22" height="5"></rect>
+        <line x1="10" y1="12" x2="14" y2="12"></line>
+    </symbol>
+    <symbol id="icon-doc" viewBox="0 0 24 24">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+        <line x1="16" y1="13" x2="8" y2="13"></line>
+        <line x1="16" y1="17" x2="8" y2="17"></line>
+    </symbol>
+    <symbol id="icon-sheet" viewBox="0 0 24 24">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+        <line x1="3" y1="9" x2="21" y2="9"></line>
+        <line x1="3" y1="15" x2="21" y2="15"></line>
+        <line x1="9" y1="3" x2="9" y2="21"></line>
+        <line x1="15" y1="3" x2="15" y2="21"></line>
+    </symbol>
+    <symbol id="icon-pres" viewBox="0 0 24 24">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+        <line x1="8" y1="21" x2="16" y2="21"></line>
+        <line x1="12" y1="17" x2="12" y2="21"></line>
+    </symbol>
+    <symbol id="icon-code" viewBox="0 0 24 24">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+    </symbol>
+    <symbol id="icon-design" viewBox="0 0 24 24">
+        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+        <polyline points="2 17 12 22 22 17"></polyline>
+        <polyline points="2 12 12 17 22 12"></polyline>
+    </symbol>
+    <symbol id="icon-generic" viewBox="0 0 24 24">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+    </symbol>
+</svg>
 
 <nav class="app-nav" aria-label="Main Navigation">
     <div class="nav-inner">
@@ -1127,8 +1390,9 @@ UPLOAD_HTML = """
                 <thead>
                     <tr>
                         <th scope="col">Name</th>
-                        <th scope="col">Size</th>
-                        <th scope="col">Added</th>
+                        <th scope="col" class="desktop-only-col">Type</th>
+                        <th scope="col" class="desktop-only-col">Size</th>
+                        <th scope="col" class="desktop-only-col">Added</th>
                         <th scope="col" style="text-align: right;">Action</th>
                     </tr>
                 </thead>
@@ -1137,15 +1401,18 @@ UPLOAD_HTML = """
                     <tr class="file-row">
                         <td>
                             <div class="file-name-cell">
-                                <svg class="file-icon svg-icon" viewBox="0 0 24 24">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                    <polyline points="14 2 14 8 20 8"></polyline>
-                                </svg>
-                                <span class="file-name-text">{{ f.name }}</span>
+                                <div class="file-icon-box {{ f.type_info.badge_class }}" aria-hidden="true">
+                                    <svg><use href="#icon-{{ f.type_info.icon }}"></use></svg>
+                                </div>
+                                <div class="file-title-group">
+                                    <span class="file-name-text">{{ f.name }}</span>
+                                    <span class="file-type-subtext">{{ f.type_info.label }} · {{ f.size_str }}</span>
+                                </div>
                             </div>
                         </td>
-                        <td class="file-size-cell">{{ f.size_str }}</td>
-                        <td class="file-date-cell">{{ f.mtime_str }}</td>
+                        <td class="file-type-cell desktop-only-col">{{ f.type_info.label }}</td>
+                        <td class="file-size-cell desktop-only-col">{{ f.size_str }}</td>
+                        <td class="file-date-cell desktop-only-col">{{ f.mtime_str }}</td>
                         <td style="text-align: right;">
                             <a href="/download/{{ f.name }}" class="btn btn-sm" download aria-label="Download {{ f.name }}">
                                 <svg class="svg-icon" viewBox="0 0 24 24">
@@ -1955,7 +2222,8 @@ function filterFiles() {
     let visible = 0;
     rows.forEach(row => {
         const name = row.querySelector('.file-name-text').textContent.toLowerCase();
-        if (name.includes(query)) {
+        const typeSub = row.querySelector('.file-type-subtext') ? row.querySelector('.file-type-subtext').textContent.toLowerCase() : '';
+        if (name.includes(query) || typeSub.includes(query)) {
             row.style.display = '';
             visible++;
         } else {
@@ -2011,12 +2279,14 @@ def index():
                 full_path = os.path.join(UPLOAD_DIR, fname)
                 if os.path.isfile(full_path) and not fname.startswith('.') and is_safe_path(UPLOAD_DIR, full_path):
                     stat = os.stat(full_path)
+                    type_info = get_file_type_info(fname)
                     file_list.append({
                         "name": fname,
                         "size": stat.st_size,
                         "size_str": format_bytes(stat.st_size),
                         "mtime": stat.st_mtime,
-                        "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime("%b %d, %Y")
+                        "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime("%b %d, %Y"),
+                        "type_info": type_info
                     })
             file_list.sort(key=lambda x: x["mtime"], reverse=True)
         except Exception as e:
