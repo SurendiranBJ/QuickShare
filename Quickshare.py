@@ -224,36 +224,15 @@ def get_file_type_info(filename):
         "markdown": ("text", "Markdown Document", "file-text", "text"),
         "log": ("text", "Log File", "file-text", "text"),
         
-        # Archive
-        "zip": ("archive", "ZIP Archive", "file-archive", "archive"),
-        "rar": ("archive", "RAR Archive", "file-archive", "archive"),
-        "7z": ("archive", "7Z Archive", "file-archive", "archive"),
-        "tar": ("archive", "TAR Archive", "file-archive", "archive"),
-        "gz": ("archive", "GZ Archive", "file-archive", "archive"),
-        "bz2": ("archive", "BZ2 Archive", "file-archive", "archive"),
-        "xz": ("archive", "XZ Archive", "file-archive", "archive"),
-        "tar.gz": ("archive", "Tarball Archive", "file-archive", "archive"),
-        "tar.bz2": ("archive", "Tarball Archive", "file-archive", "archive"),
-        "tar.xz": ("archive", "Tarball Archive", "file-archive", "archive"),
-        
-        # Office / Documents
-        "doc": ("document", "Word Document", "file-doc", "doc"),
-        "docx": ("document", "Word Document", "file-doc", "doc"),
-        "xls": ("spreadsheet", "Excel Spreadsheet", "file-sheet", "sheet"),
-        "xlsx": ("spreadsheet", "Excel Spreadsheet", "file-sheet", "sheet"),
-        "csv": ("spreadsheet", "CSV Spreadsheet", "file-sheet", "sheet"),
-        "ppt": ("presentation", "PowerPoint Presentation", "file-pres", "pres"),
-        "pptx": ("presentation", "PowerPoint Presentation", "file-pres", "pres"),
-        
-        # Code / Dev
-        "html": ("code", "HTML Document", "file-code", "code"),
-        "htm": ("code", "HTML Document", "file-code", "code"),
-        "css": ("code", "CSS Stylesheet", "file-code", "code"),
+        # Code / Development
+        "py": ("code", "Python Script", "file-code", "code"),
         "js": ("code", "JavaScript Source", "file-code", "code"),
         "jsx": ("code", "React JSX Source", "file-code", "code"),
         "ts": ("code", "TypeScript Source", "file-code", "code"),
         "tsx": ("code", "React TSX Source", "file-code", "code"),
-        "py": ("code", "Python Script", "file-code", "code"),
+        "html": ("code", "HTML Document", "file-code", "code"),
+        "htm": ("code", "HTML Document", "file-code", "code"),
+        "css": ("code", "CSS Stylesheet", "file-code", "code"),
         "java": ("code", "Java Source", "file-code", "code"),
         "cpp": ("code", "C++ Source", "file-code", "code"),
         "c": ("code", "C Source", "file-code", "code"),
@@ -271,6 +250,39 @@ def get_file_type_info(filename):
         "yaml": ("code", "YAML File", "file-code", "code"),
         "yml": ("code", "YAML File", "file-code", "code"),
         "sql": ("code", "SQL Database Script", "file-code", "code"),
+        
+        # Archive
+        "zip": ("archive", "ZIP Archive", "file-archive", "archive"),
+        "rar": ("archive", "RAR Archive", "file-archive", "archive"),
+        "7z": ("archive", "7Z Archive", "file-archive", "archive"),
+        "tar": ("archive", "TAR Archive", "file-archive", "archive"),
+        "gz": ("archive", "GZ Archive", "file-archive", "archive"),
+        "bz2": ("archive", "BZ2 Archive", "file-archive", "archive"),
+        "xz": ("archive", "XZ Archive", "file-archive", "archive"),
+        "tar.gz": ("archive", "Tarball Archive", "file-archive", "archive"),
+        "tar.bz2": ("archive", "Tarball Archive", "file-archive", "archive"),
+        "tar.xz": ("archive", "Tarball Archive", "file-archive", "archive"),
+        
+        # Executables / Applications
+        "exe": ("executable", "Application · EXE", "file-exe", "exe"),
+        "msi": ("executable", "Windows Installer", "file-exe", "exe"),
+        "app": ("executable", "macOS Application", "file-exe", "exe"),
+        "apk": ("executable", "Android Package", "file-exe", "exe"),
+        "dmg": ("executable", "Disk Image", "file-exe", "exe"),
+        "deb": ("executable", "Debian Package", "file-exe", "exe"),
+        "rpm": ("executable", "RPM Package", "file-exe", "exe"),
+        
+        # Office / Documents
+        "doc": ("document", "Word Document", "file-doc", "doc"),
+        "docx": ("document", "Word Document", "file-doc", "doc"),
+        "odt": ("document", "OpenDocument Text", "file-doc", "doc"),
+        "xls": ("spreadsheet", "Excel Spreadsheet", "file-sheet", "sheet"),
+        "xlsx": ("spreadsheet", "Excel Spreadsheet", "file-sheet", "sheet"),
+        "csv": ("spreadsheet", "CSV Spreadsheet", "file-sheet", "sheet"),
+        "ods": ("spreadsheet", "OpenDocument Spreadsheet", "file-sheet", "sheet"),
+        "ppt": ("presentation", "PowerPoint Presentation", "file-pres", "pres"),
+        "pptx": ("presentation", "PowerPoint Presentation", "file-pres", "pres"),
+        "odp": ("presentation", "OpenDocument Presentation", "file-pres", "pres"),
         
         # Design
         "psd": ("design", "Photoshop Document", "file-design", "design"),
@@ -465,7 +477,7 @@ if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
     cleanup_thread.start()
 
 # -----------------------------------------------------------------------------
-# Frontend HTML / UI Template (Professional File-Type Icon System — Zero Emojis)
+# Frontend HTML / UI Template (Restored QR, File-Type Icons & Search)
 # -----------------------------------------------------------------------------
 UPLOAD_HTML = """
 <!DOCTYPE html>
@@ -577,14 +589,14 @@ UPLOAD_HTML = """
         .nav-actions {
             display: flex;
             align-items: center;
-            gap: 0.65rem;
+            gap: 0.55rem;
         }
 
         .lan-pill-btn {
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            padding: 0.38rem 0.75rem;
+            border-radius: var(--radius-sm);
+            padding: 0.4rem 0.75rem;
             display: inline-flex;
             align-items: center;
             gap: 0.55rem;
@@ -633,6 +645,8 @@ UPLOAD_HTML = """
             align-items: center;
             justify-content: space-between;
             margin-bottom: 0.85rem;
+            gap: 0.5rem;
+            flex-wrap: wrap;
         }
 
         .section-title {
@@ -641,6 +655,12 @@ UPLOAD_HTML = """
             text-transform: uppercase;
             letter-spacing: 0.06em;
             color: var(--text-tertiary);
+        }
+
+        .section-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
 
         /* Dropzone Component */
@@ -717,8 +737,8 @@ UPLOAD_HTML = """
             color: var(--text-primary);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-sm);
-            padding: 0.5rem 0.95rem;
-            font-size: 0.85rem;
+            padding: 0.45rem 0.85rem;
+            font-size: 0.82rem;
             font-weight: 500;
             cursor: pointer;
             transition: var(--transition-smooth);
@@ -727,7 +747,7 @@ UPLOAD_HTML = """
             justify-content: center;
             gap: 0.45rem;
             text-decoration: none;
-            min-height: 36px;
+            min-height: 34px;
         }
 
         .btn:hover, .btn:focus-visible {
@@ -933,6 +953,7 @@ UPLOAD_HTML = """
             align-items: center;
             justify-content: space-between;
             gap: 0.75rem;
+            flex-wrap: wrap;
         }
 
         .search-box {
@@ -940,7 +961,7 @@ UPLOAD_HTML = """
             display: flex;
             align-items: center;
             width: 100%;
-            max-width: 260px;
+            max-width: 280px;
         }
 
         .search-icon {
@@ -973,6 +994,7 @@ UPLOAD_HTML = """
             width: 100%;
             border-collapse: collapse;
             font-size: 0.85rem;
+            table-layout: fixed;
         }
 
         .file-table th {
@@ -1008,7 +1030,7 @@ UPLOAD_HTML = """
             align-items: center;
             gap: 0.85rem;
             font-weight: 500;
-            word-break: break-all;
+            min-width: 0;
         }
 
         .file-icon-box {
@@ -1038,11 +1060,12 @@ UPLOAD_HTML = """
         .file-icon-box.file-image { background: rgba(59, 130, 246, 0.12); color: #60a5fa; border-color: rgba(59, 130, 246, 0.25); }
         .file-icon-box.file-pdf { background: rgba(244, 63, 94, 0.12); color: #fb7185; border-color: rgba(244, 63, 94, 0.25); }
         .file-icon-box.file-text { background: rgba(148, 163, 184, 0.12); color: #cbd5e1; border-color: rgba(148, 163, 184, 0.2); }
+        .file-icon-box.file-code { background: rgba(234, 179, 8, 0.12); color: #facc15; border-color: rgba(234, 179, 8, 0.25); }
         .file-icon-box.file-archive { background: rgba(139, 92, 246, 0.12); color: #a78bfa; border-color: rgba(139, 92, 246, 0.25); }
+        .file-icon-box.file-exe { background: rgba(249, 115, 22, 0.12); color: #fb923c; border-color: rgba(249, 115, 22, 0.25); }
         .file-icon-box.file-doc { background: rgba(37, 99, 235, 0.12); color: #93c5fd; border-color: rgba(37, 99, 235, 0.25); }
         .file-icon-box.file-sheet { background: rgba(16, 185, 129, 0.12); color: #34d399; border-color: rgba(16, 185, 129, 0.25); }
         .file-icon-box.file-pres { background: rgba(249, 115, 22, 0.12); color: #fb923c; border-color: rgba(249, 115, 22, 0.25); }
-        .file-icon-box.file-code { background: rgba(234, 179, 8, 0.12); color: #facc15; border-color: rgba(234, 179, 8, 0.25); }
         .file-icon-box.file-design { background: rgba(236, 72, 153, 0.12); color: #f472b6; border-color: rgba(236, 72, 153, 0.25); }
         .file-icon-box.file-generic { background: rgba(100, 116, 139, 0.12); color: #94a3b8; border-color: rgba(100, 116, 139, 0.2); }
 
@@ -1051,33 +1074,37 @@ UPLOAD_HTML = """
             flex-direction: column;
             gap: 0.15rem;
             min-width: 0;
+            overflow: hidden;
         }
 
         .file-name-text {
             font-size: 0.88rem;
             font-weight: 600;
             color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .file-type-subtext {
             font-size: 0.76rem;
             color: var(--text-tertiary);
-        }
-
-        .file-type-cell {
-            font-size: 0.8rem;
-            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .file-size-cell {
             font-family: var(--font-mono);
             font-size: 0.8rem;
             color: var(--text-secondary);
+            white-space: nowrap;
         }
 
         .file-date-cell {
             font-size: 0.8rem;
             color: var(--text-tertiary);
+            white-space: nowrap;
         }
 
         .empty-state {
@@ -1105,7 +1132,7 @@ UPLOAD_HTML = """
             position: fixed;
             inset: 0;
             background: rgba(0, 0, 0, 0.75);
-            backdrop-filter: blur(4px);
+            backdrop-filter: blur(6px);
             display: none;
             align-items: center;
             justify-content: center;
@@ -1118,7 +1145,7 @@ UPLOAD_HTML = """
             border: 1px solid var(--border-strong);
             border-radius: var(--radius-lg);
             padding: 1.5rem;
-            max-width: 360px;
+            max-width: 380px;
             width: 100%;
             display: flex;
             flex-direction: column;
@@ -1140,6 +1167,13 @@ UPLOAD_HTML = """
             color: var(--text-primary);
         }
 
+        .modal-subtitle {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-align: center;
+            line-height: 1.4;
+        }
+
         .qr-card {
             background: #ffffff;
             padding: 0.85rem;
@@ -1147,11 +1181,12 @@ UPLOAD_HTML = """
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 200px;
-            height: 200px;
+            width: 210px;
+            height: 210px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
 
-        .qr-card svg {
+        .qr-card svg, .qr-card img {
             width: 100%;
             height: 100%;
         }
@@ -1173,6 +1208,12 @@ UPLOAD_HTML = """
             font-size: 0.8rem;
             color: var(--accent-text);
             word-break: break-all;
+        }
+
+        .modal-footer-note {
+            font-size: 0.75rem;
+            color: var(--text-tertiary);
+            text-align: center;
         }
 
         /* Toast Notifications */
@@ -1209,8 +1250,8 @@ UPLOAD_HTML = """
         /* Mobile Responsive Adjustments */
         @media (max-width: 640px) {
             .workspace { padding: 1.5rem 1rem 3rem; gap: 2rem; }
-            .btn { min-height: 42px; }
-            .btn-sm { min-height: 38px; }
+            .btn { min-height: 40px; }
+            .btn-sm { min-height: 36px; }
             
             .search-box { max-width: 100%; }
 
@@ -1235,6 +1276,11 @@ UPLOAD_HTML = """
 
             .desktop-only-col { display: none; }
 
+            .file-name-text {
+                white-space: normal;
+                word-break: break-all;
+            }
+
             .file-table td:last-child {
                 margin-top: 0.6rem;
                 padding-top: 0.4rem;
@@ -1252,72 +1298,6 @@ UPLOAD_HTML = """
 </head>
 <body>
 
-<!-- Reusable Hidden SVG Icon Definitions -->
-<svg style="display: none;" xmlns="http://www.w3.org/2000/svg">
-    <symbol id="icon-video" viewBox="0 0 24 24">
-        <polygon points="5 3 19 12 5 21 5 3"></polygon>
-    </symbol>
-    <symbol id="icon-audio" viewBox="0 0 24 24">
-        <path d="M9 18V5l12-2v13"></path>
-        <circle cx="6" cy="18" r="3"></circle>
-        <circle cx="18" cy="16" r="3"></circle>
-    </symbol>
-    <symbol id="icon-image" viewBox="0 0 24 24">
-        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-        <circle cx="8.5" cy="8.5" r="1.5"></circle>
-        <polyline points="21 15 16 10 5 21"></polyline>
-    </symbol>
-    <symbol id="icon-pdf" viewBox="0 0 24 24">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-        <line x1="9" y1="13" x2="15" y2="13"></line>
-        <line x1="9" y1="17" x2="13" y2="17"></line>
-    </symbol>
-    <symbol id="icon-text" viewBox="0 0 24 24">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-        <line x1="16" y1="13" x2="8" y2="13"></line>
-        <line x1="16" y1="17" x2="8" y2="17"></line>
-        <line x1="10" y1="9" x2="8" y2="9"></line>
-    </symbol>
-    <symbol id="icon-archive" viewBox="0 0 24 24">
-        <polyline points="21 8 21 21 3 21 3 8"></polyline>
-        <rect x="1" y="3" width="22" height="5"></rect>
-        <line x1="10" y1="12" x2="14" y2="12"></line>
-    </symbol>
-    <symbol id="icon-doc" viewBox="0 0 24 24">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-        <line x1="16" y1="13" x2="8" y2="13"></line>
-        <line x1="16" y1="17" x2="8" y2="17"></line>
-    </symbol>
-    <symbol id="icon-sheet" viewBox="0 0 24 24">
-        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-        <line x1="3" y1="9" x2="21" y2="9"></line>
-        <line x1="3" y1="15" x2="21" y2="15"></line>
-        <line x1="9" y1="3" x2="9" y2="21"></line>
-        <line x1="15" y1="3" x2="15" y2="21"></line>
-    </symbol>
-    <symbol id="icon-pres" viewBox="0 0 24 24">
-        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-        <line x1="8" y1="21" x2="16" y2="21"></line>
-        <line x1="12" y1="17" x2="12" y2="21"></line>
-    </symbol>
-    <symbol id="icon-code" viewBox="0 0 24 24">
-        <polyline points="16 18 22 12 16 6"></polyline>
-        <polyline points="8 6 2 12 8 18"></polyline>
-    </symbol>
-    <symbol id="icon-design" viewBox="0 0 24 24">
-        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-        <polyline points="2 17 12 22 22 17"></polyline>
-        <polyline points="2 12 12 17 22 12"></polyline>
-    </symbol>
-    <symbol id="icon-generic" viewBox="0 0 24 24">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-    </symbol>
-</svg>
-
 <nav class="app-nav" aria-label="Main Navigation">
     <div class="nav-inner">
         <a href="/" class="brand-group" aria-label="QuickShare Home">
@@ -1329,11 +1309,26 @@ UPLOAD_HTML = """
         </a>
 
         <div class="nav-actions">
-            <button class="lan-pill-btn" onclick="openQrModal()" aria-label="Open Local Network details and QR code">
-                <div class="status-dot"></div>
-                <span>Local network</span>
-                <span class="lan-ip-text">{{ lan_ip }}:{{ port }}</span>
+            <button class="btn btn-sm" onclick="copyLanUrl()" aria-label="Copy LAN URL">
+                <svg class="svg-icon" viewBox="0 0 24 24">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copy Address</span>
             </button>
+            <button class="btn btn-sm btn-primary" onclick="openQrModal()" aria-label="Show QR Code for mobile connection">
+                <svg class="svg-icon" viewBox="0 0 24 24">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                </svg>
+                <span>Show QR</span>
+            </button>
+            <div class="lan-pill-btn" onclick="openQrModal()" title="Connected to Local Network">
+                <div class="status-dot"></div>
+                <span class="lan-ip-text">{{ lan_ip }}:{{ port }}</span>
+            </div>
         </div>
     </div>
 </nav>
@@ -1372,6 +1367,17 @@ UPLOAD_HTML = """
     <section aria-labelledby="filesSectionHeading">
         <div class="section-header">
             <h2 class="section-title" id="filesSectionHeading">Available Files (<span id="fileCount">{{ files|length }}</span>)</h2>
+            <div class="section-actions">
+                <button class="btn btn-sm" onclick="openQrModal()">
+                    <svg class="svg-icon" viewBox="0 0 24 24">
+                        <rect x="3" y="3" width="7" height="7"></rect>
+                        <rect x="14" y="3" width="7" height="7"></rect>
+                        <rect x="14" y="14" width="7" height="7"></rect>
+                        <rect x="3" y="14" width="7" height="7"></rect>
+                    </svg>
+                    <span>Connect Phone</span>
+                </button>
+            </div>
         </div>
 
         <div class="files-container">
@@ -1382,35 +1388,59 @@ UPLOAD_HTML = """
                         <circle cx="11" cy="11" r="8"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
-                    <input type="search" id="fileSearch" class="search-input" placeholder="Filter files..." aria-label="Filter available files" oninput="filterFiles()">
+                    <input type="search" id="fileSearch" class="search-input" placeholder="Search files..." aria-label="Search available files" oninput="filterFiles()">
                 </div>
             </div>
 
             <table class="file-table" id="fileTable">
                 <thead>
                     <tr>
-                        <th scope="col">Name</th>
-                        <th scope="col" class="desktop-only-col">Type</th>
-                        <th scope="col" class="desktop-only-col">Size</th>
-                        <th scope="col" class="desktop-only-col">Added</th>
-                        <th scope="col" style="text-align: right;">Action</th>
+                        <th scope="col" style="width: 55%;">Name</th>
+                        <th scope="col" class="desktop-only-col" style="width: 15%;">Size</th>
+                        <th scope="col" class="desktop-only-col" style="width: 15%;">Added</th>
+                        <th scope="col" style="width: 15%; text-align: right;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for f in files %}
-                    <tr class="file-row">
+                    <tr class="file-row" data-filename="{{ f.name|lower }}" data-type="{{ f.type_info.label|lower }}">
                         <td>
                             <div class="file-name-cell">
                                 <div class="file-icon-box {{ f.type_info.badge_class }}" aria-hidden="true">
-                                    <svg><use href="#icon-{{ f.type_info.icon }}"></use></svg>
+                                    {% if f.type_info.icon == 'video' %}
+                                        <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                                    {% elif f.type_info.icon == 'audio' %}
+                                        <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                                    {% elif f.type_info.icon == 'image' %}
+                                        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                                    {% elif f.type_info.icon == 'pdf' %}
+                                        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="13" x2="15" y2="13"></line><line x1="9" y1="17" x2="13" y2="17"></line></svg>
+                                    {% elif f.type_info.icon == 'text' %}
+                                        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
+                                    {% elif f.type_info.icon == 'code' %}
+                                        <svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                                    {% elif f.type_info.icon == 'archive' %}
+                                        <svg viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>
+                                    {% elif f.type_info.icon == 'exe' %}
+                                        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M7 8l4 4-4 4"></path><line x1="13" y1="16" x2="17" y2="16"></line></svg>
+                                    {% elif f.type_info.icon == 'doc' %}
+                                        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                                    {% elif f.type_info.icon == 'sheet' %}
+                                        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line></svg>
+                                    {% elif f.type_info.icon == 'pres' %}
+                                        <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                                    {% elif f.type_info.icon == 'design' %}
+                                        <svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                                    {% else %}
+                                        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                    {% endif %}
                                 </div>
                                 <div class="file-title-group">
-                                    <span class="file-name-text">{{ f.name }}</span>
+                                    <span class="file-name-text" title="{{ f.name }}">{{ f.name }}</span>
                                     <span class="file-type-subtext">{{ f.type_info.label }} · {{ f.size_str }}</span>
                                 </div>
                             </div>
                         </td>
-                        <td class="file-type-cell desktop-only-col">{{ f.type_info.label }}</td>
                         <td class="file-size-cell desktop-only-col">{{ f.size_str }}</td>
                         <td class="file-date-cell desktop-only-col">{{ f.mtime_str }}</td>
                         <td style="text-align: right;">
@@ -1448,6 +1478,10 @@ UPLOAD_HTML = """
             </button>
         </div>
 
+        <div class="modal-subtitle">
+            Scan this code with your phone camera to access QuickShare over Wi-Fi
+        </div>
+
         <div class="qr-card">
             {% if qr_svg %}
                 {{ qr_svg|safe }}
@@ -1465,6 +1499,10 @@ UPLOAD_HTML = """
                 </svg>
                 <span id="copyBtnText">Copy</span>
             </button>
+        </div>
+
+        <div class="modal-footer-note">
+            Devices must be connected to the same local network.
         </div>
     </div>
 </div>
@@ -1526,9 +1564,9 @@ function copyLanUrl() {
     const url = document.getElementById("lanUrlText").textContent;
     navigator.clipboard.writeText(url).then(() => {
         const copyText = document.getElementById("copyBtnText");
-        copyText.textContent = "Copied";
+        if (copyText) copyText.textContent = "Copied";
         showToast("Address copied to clipboard");
-        setTimeout(() => { copyText.textContent = "Copy"; }, 2000);
+        if (copyText) setTimeout(() => { copyText.textContent = "Copy"; }, 2000);
     }).catch(() => {
         showToast("Address: " + url);
     });
@@ -1541,6 +1579,13 @@ function openQrModal() {
 function closeQrModal(event) {
     document.getElementById("qrModal").style.display = "none";
 }
+
+// Keyboard escape to close modal
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeQrModal();
+    }
+});
 
 // ---------------------------------------------------------------------------
 // Local Storage Session Management
@@ -2215,15 +2260,15 @@ dropzone.addEventListener('drop', (e) => {
     }
 });
 
-// File list search
+// File list search across filename and file type
 function filterFiles() {
-    const query = document.getElementById('fileSearch').value.toLowerCase();
+    const query = document.getElementById('fileSearch').value.toLowerCase().trim();
     const rows = document.querySelectorAll('.file-row');
     let visible = 0;
     rows.forEach(row => {
-        const name = row.querySelector('.file-name-text').textContent.toLowerCase();
-        const typeSub = row.querySelector('.file-type-subtext') ? row.querySelector('.file-type-subtext').textContent.toLowerCase() : '';
-        if (name.includes(query) || typeSub.includes(query)) {
+        const fname = row.getAttribute('data-filename') || '';
+        const ftype = row.getAttribute('data-type') || '';
+        if (!query || fname.includes(query) || ftype.includes(query)) {
             row.style.display = '';
             visible++;
         } else {
