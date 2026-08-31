@@ -9,6 +9,7 @@ import re
 import math
 import logging
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from flask import Flask, request, send_from_directory, render_template_string, jsonify, abort
 from werkzeug.utils import secure_filename
@@ -29,9 +30,9 @@ logger = logging.getLogger("QuickShare")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
-DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024  # 5 MB
-UPLOAD_CACHE_TIMEOUT = 24 * 3600      # 24 hours in seconds
-CLEANUP_INTERVAL = 3600               # Check expired cache every 1 hour
+DEFAULT_CHUNK_SIZE = int(os.getenv("DEFAULT_CHUNK_SIZE", 5 * 1024 * 1024))  # 5 MB
+UPLOAD_CACHE_TIMEOUT = int(os.getenv("UPLOAD_CACHE_TIMEOUT", 21600))        # 6 hours (configurable via env)
+CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", 1800))                 # Check expired cache every 30 mins
 UUID_REGEX = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', re.IGNORECASE)
 
 # Ensure directories exist
@@ -39,11 +40,49 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 app = Flask(__name__)
-# Allow large chunk payloads (e.g., up to 100MB per chunk if configured)
+# Allow large chunk payloads (up to 100MB per chunk if configured)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 
-# Lock for metadata updates
-metadata_lock = threading.Lock()
+# -----------------------------------------------------------------------------
+# Per-Upload Fine-Grained Locking Manager
+# -----------------------------------------------------------------------------
+class UploadLockManager:
+    """Provides thread-safe per-upload locks without global contention or memory leaks."""
+    def __init__(self):
+        self._guard = threading.Lock()
+        self._locks = {}  # upload_id -> [Lock, ref_count]
+        self._filename_collision_lock = threading.Lock()
+
+    @contextmanager
+    def acquire(self, upload_id):
+        if not upload_id:
+            yield
+            return
+
+        with self._guard:
+            if upload_id not in self._locks:
+                self._locks[upload_id] = [threading.Lock(), 0]
+            entry = self._locks[upload_id]
+            entry[1] += 1
+            lock = entry[0]
+
+        lock.acquire()
+        try:
+            yield
+        finally:
+            lock.release()
+            with self._guard:
+                entry[1] -= 1
+                if entry[1] <= 0 and upload_id in self._locks:
+                    del self._locks[upload_id]
+
+    @contextmanager
+    def filename_lock(self):
+        """Global lock used only during final non-colliding filename determination."""
+        with self._filename_collision_lock:
+            yield
+
+upload_lock_manager = UploadLockManager()
 
 # -----------------------------------------------------------------------------
 # Helper Functions
@@ -65,17 +104,24 @@ def is_valid_uuid(val):
     """Check if the value is a valid UUID string."""
     return bool(val and isinstance(val, str) and UUID_REGEX.match(val))
 
+def is_safe_path(base_directory, target_path):
+    """Verify that target_path is strictly contained within base_directory."""
+    try:
+        base_abs = os.path.abspath(base_directory)
+        target_abs = os.path.abspath(target_path)
+        return os.path.commonpath([base_abs, target_abs]) == base_abs
+    except (ValueError, Exception):
+        return False
+
 def sanitize_filename(filename):
     """Sanitize filename securely while preserving original extension."""
     if not filename:
         return f"file_{uuid.uuid4().hex[:8]}"
     
-    # Strip dangerous characters and path separators
     clean_name = os.path.basename(filename).strip()
     safe_name = secure_filename(clean_name)
     
     if not safe_name:
-        # Fallback if filename contains only non-ascii or stripped characters
         _, ext = os.path.splitext(clean_name)
         safe_ext = secure_filename(ext)
         safe_name = f"file_{uuid.uuid4().hex[:8]}{safe_ext}"
@@ -98,12 +144,11 @@ def get_unique_filename(destination_dir, filename):
         counter += 1
 
 def get_upload_cache_dir(upload_id):
-    """Get absolute path to an upload's cache directory with path traversal protection."""
+    """Get absolute path to an upload's cache directory with strict path containment check."""
     if not is_valid_uuid(upload_id):
         return None
-    cache_path = os.path.abspath(os.path.join(CACHE_DIR, upload_id))
-    # Path traversal check
-    if not cache_path.startswith(os.path.abspath(CACHE_DIR)):
+    cache_path = os.path.join(CACHE_DIR, upload_id)
+    if not is_safe_path(CACHE_DIR, cache_path):
         return None
     return cache_path
 
@@ -163,39 +208,46 @@ def save_metadata(upload_id, metadata):
         return False
 
 def clean_expired_cache():
-    """Scans cache directory and cleans up abandoned uploads."""
+    """Scans cache directory and cleans up abandoned uploads safely with lock."""
     if not os.path.exists(CACHE_DIR):
         return
     now = time.time()
     count_cleaned = 0
     try:
         for entry in os.listdir(CACHE_DIR):
+            if not is_valid_uuid(entry):
+                continue
             item_path = os.path.join(CACHE_DIR, entry)
             if not os.path.isdir(item_path):
                 continue
             
-            # Check upload metadata or directory modification time
-            meta_path = os.path.join(item_path, "metadata.json")
-            last_activity = None
-            if os.path.exists(meta_path):
-                try:
-                    with open(meta_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        last_activity = data.get("updated_at")
-                except Exception:
-                    pass
-            
-            if last_activity is None:
-                last_activity = os.path.getmtime(item_path)
+            with upload_lock_manager.acquire(entry):
+                # Check upload metadata
+                meta = load_metadata(entry)
+                last_activity = None
+                status = "unknown"
+                if meta:
+                    last_activity = meta.get("updated_at")
+                    status = meta.get("status", "unknown")
                 
-            if now - last_activity > UPLOAD_CACHE_TIMEOUT:
-                logger.info(f"UPLOAD EXPIRED: upload_id={entry} inactive for {int(now - last_activity)}s. Deleting cache.")
-                try:
-                    shutil.rmtree(item_path, ignore_errors=True)
-                    count_cleaned += 1
-                except Exception as err:
-                    logger.error(f"Failed to remove expired cache for {entry}: {err}")
-                    
+                if last_activity is None:
+                    try:
+                        last_activity = os.path.getmtime(item_path)
+                    except OSError:
+                        continue
+                
+                # Do not delete if currently assembling unless assembling has timed out (> 10 mins)
+                if status == "assembling" and (now - last_activity < 600):
+                    continue
+
+                if now - last_activity > UPLOAD_CACHE_TIMEOUT:
+                    logger.info(f"UPLOAD EXPIRED: upload_id={entry} inactive for {int(now - last_activity)}s. Deleting cache.")
+                    try:
+                        shutil.rmtree(item_path, ignore_errors=True)
+                        count_cleaned += 1
+                    except Exception as err:
+                        logger.error(f"Failed to remove expired cache for {entry}: {err}")
+                        
         if count_cleaned > 0:
             logger.info(f"CACHE CLEANED: Removed {count_cleaned} expired upload cache(s).")
     except Exception as e:
@@ -213,10 +265,13 @@ def cache_cleanup_worker():
 # Run initial cleanup on startup
 clean_expired_cache()
 
-# Start background cleanup thread (safe with Flask debug reloader)
-if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-    cleanup_thread = threading.Thread(target=cache_cleanup_worker, daemon=True, name="CacheCleanupWorker")
-    cleanup_thread.start()
+# Start background cleanup thread safely with Flask debug reloader
+def start_cleanup_thread_if_needed():
+    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        cleanup_thread = threading.Thread(target=cache_cleanup_worker, daemon=True, name="CacheCleanupWorker")
+        cleanup_thread.start()
+
+start_cleanup_thread_if_needed()
 
 # -----------------------------------------------------------------------------
 # Frontend HTML / UI Template
@@ -771,7 +826,8 @@ function resumeSessionFile(event, uploadId) {
     const session = sessions[uploadId];
     if (!session) return;
 
-    if (file.name !== session.filename || file.size !== session.total_size) {
+    // Strict identity check: name, size, and lastModified
+    if (file.name !== session.filename || file.size !== session.total_size || (session.last_modified && file.lastModified !== session.last_modified)) {
         alert("The selected file does not match the interrupted upload ('" + session.filename + "'). Please select the exact file.");
         return;
     }
@@ -788,25 +844,22 @@ class ChunkedUploader {
         this.file = file;
         this.filename = file.name;
         this.totalSize = file.size;
+        this.lastModified = file.lastModified;
         this.chunkSize = CHUNK_SIZE;
         this.totalChunks = Math.ceil(this.totalSize / this.chunkSize) || 1;
         this.uploadId = existingUploadId;
         
         this.receivedChunks = new Set();
-        this.inFlightChunks = new Set();
-        this.aborted = false;
-        this.paused = false;
         this.status = 'initializing'; // initializing, uploading, paused, assembling, completed, cancelled, error
         this.errorMessage = '';
         
-        // Progress & Speed tracking
+        // Progress & Smoothed Speed tracking
         this.uploadedBytes = 0;
-        this.startTime = Date.now();
         this.lastSpeedCheck = Date.now();
         this.bytesSinceLastCheck = 0;
-        this.currentSpeed = 0; // Bytes/sec
+        this.currentSpeed = 0; // Bytes/sec (exponential moving average)
         
-        // Abort controllers for all active requests
+        // Abort controllers for all active chunk requests
         this.abortControllers = new Map();
         
         // UI element ID
@@ -832,7 +885,7 @@ class ChunkedUploader {
                 <div class="upload-actions">
                     <span class="badge badge-uploading" id="${this.elementId}-badge">Uploading</span>
                     <button class="btn btn-sm btn-secondary" id="${this.elementId}-pause-btn" onclick="togglePauseUpload('${this.elementId}')">Pause</button>
-                    <button class="btn btn-sm btn-danger" onclick="cancelUpload('${this.elementId}')">Cancel</button>
+                    <button class="btn btn-sm btn-danger" id="${this.elementId}-cancel-btn" onclick="cancelUpload('${this.elementId}')">Cancel</button>
                 </div>
             </div>
             <div class="progress-bar-container">
@@ -855,12 +908,13 @@ class ChunkedUploader {
         const speedText = document.getElementById(`${this.elementId}-speed-text`);
         const chunksText = document.getElementById(`${this.elementId}-chunks`);
         const pauseBtn = document.getElementById(`${this.elementId}-pause-btn`);
+        const cancelBtn = document.getElementById(`${this.elementId}-cancel-btn`);
 
         if (chunksText) {
             chunksText.textContent = `${this.receivedChunks.size}/${this.totalChunks} chunks`;
         }
 
-        // Calculate progress percentage
+        // Calculate progress percentage based on confirmed chunks
         let percent = 0;
         if (this.totalSize > 0) {
             let confirmedBytes = 0;
@@ -916,7 +970,15 @@ class ChunkedUploader {
                 pauseBtn.style.display = 'none';
             } else {
                 pauseBtn.style.display = 'inline-block';
-                pauseBtn.textContent = this.paused ? 'Resume' : 'Pause';
+                pauseBtn.textContent = (this.status === 'paused') ? 'Resume' : 'Pause';
+            }
+        }
+
+        if (cancelBtn) {
+            if (this.status === 'completed' || this.status === 'cancelled') {
+                cancelBtn.style.display = 'none';
+            } else {
+                cancelBtn.style.display = 'inline-block';
             }
         }
     }
@@ -964,7 +1026,8 @@ class ChunkedUploader {
                 filename: this.filename,
                 total_size: this.totalSize,
                 chunk_size: this.chunkSize,
-                total_chunks: this.totalChunks
+                total_chunks: this.totalChunks,
+                last_modified: this.lastModified
             });
 
             this.updateUI();
@@ -972,7 +1035,7 @@ class ChunkedUploader {
             // Step 2: Upload missing chunks concurrently
             await this.uploadChunksLoop();
 
-            if (this.aborted || this.paused) return;
+            if (this.status === 'cancelled' || this.status === 'paused') return;
 
             // Step 3: Complete upload
             this.status = 'assembling';
@@ -999,7 +1062,7 @@ class ChunkedUploader {
             }, 1200);
 
         } catch (err) {
-            if (this.aborted) return;
+            if (this.status === 'cancelled' || this.status === 'paused') return;
             console.error("Upload error:", err);
             this.status = 'error';
             this.errorMessage = err.message || "Network error occurred";
@@ -1018,16 +1081,18 @@ class ChunkedUploader {
         let workerCount = Math.min(UPLOAD_CONCURRENCY, queue.length || 1);
         const workers = [];
 
-        // Speed calculation timer
+        // Smoothed speed calculation timer
         const speedInterval = setInterval(() => {
-            if (this.aborted || this.paused || this.status === 'completed') {
+            if (this.status !== 'uploading') {
                 clearInterval(speedInterval);
                 return;
             }
             const now = Date.now();
             const elapsed = (now - this.lastSpeedCheck) / 1000;
             if (elapsed > 0.5) {
-                this.currentSpeed = Math.round(this.bytesSinceLastCheck / elapsed);
+                const instantSpeed = this.bytesSinceLastCheck / elapsed;
+                // Exponential moving average for smooth display
+                this.currentSpeed = this.currentSpeed === 0 ? Math.round(instantSpeed) : Math.round(0.7 * instantSpeed + 0.3 * this.currentSpeed);
                 this.bytesSinceLastCheck = 0;
                 this.lastSpeedCheck = now;
                 this.updateUI();
@@ -1036,27 +1101,26 @@ class ChunkedUploader {
 
         for (let w = 0; w < workerCount; w++) {
             workers.push((async () => {
-                while (queue.length > 0 && !this.aborted && !this.paused) {
+                while (queue.length > 0 && this.status === 'uploading') {
                     const chunkIndex = queue.shift();
                     let success = false;
                     let retries = 0;
 
-                    while (!success && retries < MAX_CHUNK_RETRIES && !this.aborted && !this.paused) {
+                    while (!success && retries < MAX_CHUNK_RETRIES && this.status === 'uploading') {
                         try {
                             await this.uploadSingleChunk(chunkIndex);
                             success = true;
                             this.receivedChunks.add(chunkIndex);
                             this.updateUI();
                         } catch (err) {
-                            if (this.aborted || this.paused) break;
+                            if (this.status !== 'uploading') break;
                             retries++;
                             console.warn(`Retry ${retries}/${MAX_CHUNK_RETRIES} for chunk ${chunkIndex}:`, err);
-                            // Exponential backoff
-                            await new Promise(r => setTimeout(r, Math.min(1000 * Math.pow(1.5, retries), 8000)));
+                            await new Promise(r => setTimeout(r, Math.min(800 * Math.pow(1.5, retries), 6000)));
                         }
                     }
 
-                    if (!success && !this.aborted && !this.paused) {
+                    if (!success && this.status === 'uploading') {
                         throw new Error(`Failed to upload chunk #${chunkIndex} after ${MAX_CHUNK_RETRIES} attempts`);
                     }
                 }
@@ -1068,6 +1132,8 @@ class ChunkedUploader {
     }
 
     async uploadSingleChunk(chunkIndex) {
+        if (this.status !== 'uploading') return;
+
         const start = chunkIndex * this.chunkSize;
         const end = Math.min(start + this.chunkSize, this.totalSize);
         const chunkBlob = this.file.slice(start, end);
@@ -1102,7 +1168,6 @@ class ChunkedUploader {
 
     pause() {
         if (this.status !== 'uploading') return;
-        this.paused = true;
         this.status = 'paused';
         // Abort in-flight requests
         for (let controller of this.abortControllers.values()) {
@@ -1114,13 +1179,19 @@ class ChunkedUploader {
 
     resume() {
         if (this.status !== 'paused') return;
-        this.paused = false;
         this.status = 'uploading';
         this.lastSpeedCheck = Date.now();
         this.bytesSinceLastCheck = 0;
         this.updateUI();
-        this.uploadChunksLoop().then(async () => {
-            if (this.aborted || this.paused) return;
+
+        // Query server to get actual missing chunks
+        fetch(`/upload/status/${this.uploadId}`).then(res => res.json()).then(statusData => {
+            if (statusData.success) {
+                this.receivedChunks = new Set(statusData.received_chunks);
+            }
+            return this.uploadChunksLoop();
+        }).then(async () => {
+            if (this.status !== 'uploading') return;
             this.status = 'assembling';
             this.updateUI();
 
@@ -1140,15 +1211,14 @@ class ChunkedUploader {
             this.updateUI();
             setTimeout(() => location.reload(), 1200);
         }).catch(err => {
-            if (this.aborted) return;
+            if (this.status === 'cancelled' || this.status === 'paused') return;
             this.status = 'error';
-            this.errorMessage = err.message;
+            this.errorMessage = err.message || "Resume failed";
             this.updateUI();
         });
     }
 
     async cancel() {
-        this.aborted = true;
         this.status = 'cancelled';
 
         // Abort all active fetch requests immediately
@@ -1172,7 +1242,7 @@ class ChunkedUploader {
 }
 
 // ---------------------------------------------------------------------------
-// UI Event Handlers
+// UI Event Handlers & Visibility Lifecycle
 // ---------------------------------------------------------------------------
 function handleFileSelection(event) {
     const files = event.target.files;
@@ -1181,7 +1251,6 @@ function handleFileSelection(event) {
     for (let i = 0; i < files.length; i++) {
         startChunkedUpload(files[i]);
     }
-    // Reset file input so same file can be selected again if needed
     event.target.value = '';
 }
 
@@ -1201,7 +1270,7 @@ function cancelUpload(elementId) {
 function togglePauseUpload(elementId) {
     const uploader = activeUploaders.get(elementId);
     if (uploader) {
-        if (uploader.paused) {
+        if (uploader.status === 'paused') {
             uploader.resume();
         } else {
             uploader.pause();
@@ -1254,6 +1323,22 @@ function filterFiles() {
     document.getElementById('fileCount').textContent = visible;
 }
 
+// Page visibility and connection recovery
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        // Tab is active again: verify active uploaders
+        activeUploaders.forEach(uploader => {
+            if (uploader.status === 'uploading') {
+                uploader.updateUI();
+            }
+        });
+    }
+});
+
+window.addEventListener('online', () => {
+    logger?.info?.("Network online detected");
+});
+
 // Init
 window.addEventListener('DOMContentLoaded', () => {
     checkSavedSessions();
@@ -1276,8 +1361,7 @@ def index():
         try:
             for fname in os.listdir(UPLOAD_DIR):
                 full_path = os.path.join(UPLOAD_DIR, fname)
-                # Only include actual regular files (no directories or temporary files)
-                if os.path.isfile(full_path) and not fname.startswith('.'):
+                if os.path.isfile(full_path) and not fname.startswith('.') and is_safe_path(UPLOAD_DIR, full_path):
                     stat = os.stat(full_path)
                     file_list.append({
                         "name": fname,
@@ -1286,7 +1370,6 @@ def index():
                         "mtime": stat.st_mtime,
                         "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
                     })
-            # Sort by newest first
             file_list.sort(key=lambda x: x["mtime"], reverse=True)
         except Exception as e:
             logger.error(f"Error listing uploads directory: {e}")
@@ -1342,9 +1425,10 @@ def upload_start():
         "status": "uploading"
     }
 
-    if not save_metadata(upload_id, metadata):
-        shutil.rmtree(cache_dir, ignore_errors=True)
-        return jsonify({"success": False, "error": "Failed to initialize upload metadata"}), 500
+    with upload_lock_manager.acquire(upload_id):
+        if not save_metadata(upload_id, metadata):
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            return jsonify({"success": False, "error": "Failed to initialize upload metadata"}), 500
 
     logger.info(f"UPLOAD START: upload_id={upload_id}, file='{safe_name}', size={total_size} bytes ({total_chunks} chunks of {chunk_size} B)")
     return jsonify({
@@ -1371,10 +1455,13 @@ def upload_chunk():
     if not cache_dir or not os.path.exists(cache_dir):
         return jsonify({"success": False, "error": "Upload session not found or expired"}), 404
 
-    with metadata_lock:
+    with upload_lock_manager.acquire(upload_id):
         metadata = load_metadata(upload_id)
         if not metadata:
             return jsonify({"success": False, "error": "Upload session metadata not found"}), 404
+
+        if metadata.get("status") in ["cancelled", "completed", "failed"]:
+            return jsonify({"success": False, "error": f"Upload session is {metadata.get('status')}"}), 400
 
         try:
             chunk_index = int(chunk_index_raw)
@@ -1391,10 +1478,10 @@ def upload_chunk():
         if not chunk_file:
             return jsonify({"success": False, "error": "Missing chunk file payload"}), 400
 
-        # Validate expected chunk size
+        # Authoritative server-side expected chunk size calculation
         expected_start = chunk_index * metadata["chunk_size"]
         expected_end = min(expected_start + metadata["chunk_size"], metadata["total_size"])
-        expected_chunk_size = expected_end - expected_start
+        expected_chunk_size = max(0, expected_end - expected_start)
 
         chunks_dir = get_chunks_dir(upload_id)
         os.makedirs(chunks_dir, exist_ok=True)
@@ -1449,7 +1536,7 @@ def upload_status(upload_id):
     if not cache_dir or not os.path.exists(cache_dir):
         return jsonify({"success": False, "error": "Upload session not found or expired"}), 404
 
-    with metadata_lock:
+    with upload_lock_manager.acquire(upload_id):
         metadata = load_metadata(upload_id)
         if not metadata:
             return jsonify({"success": False, "error": "Upload session metadata not found"}), 404
@@ -1489,7 +1576,7 @@ def upload_status(upload_id):
 
 @app.route('/upload/complete', methods=['POST'])
 def upload_complete():
-    """Verifies all chunks, streams and assembles them into uploads/, and cleans cache."""
+    """Three-phase non-blocking assembly: validates state, streams chunks, and atomically finalizes."""
     data = request.get_json(silent=True) or {}
     upload_id = data.get("upload_id")
 
@@ -1500,16 +1587,29 @@ def upload_complete():
     if not cache_dir or not os.path.exists(cache_dir):
         return jsonify({"success": False, "error": "Upload session not found or already completed"}), 404
 
-    with metadata_lock:
+    # -------------------------------------------------------------------------
+    # PHASE 1: Validation and Status Transition (Holding Upload Lock)
+    # -------------------------------------------------------------------------
+    with upload_lock_manager.acquire(upload_id):
         metadata = load_metadata(upload_id)
         if not metadata:
             return jsonify({"success": False, "error": "Upload metadata not found"}), 404
+
+        current_status = metadata.get("status")
+        if current_status == "completed":
+            return jsonify({"success": True, "message": "Upload already completed", "filename": metadata.get("safe_filename")}), 200
+
+        if current_status == "cancelled":
+            return jsonify({"success": False, "error": "Upload was cancelled"}), 400
+
+        if current_status == "assembling":
+            return jsonify({"success": False, "error": "Assembly already in progress"}), 409
 
         chunks_dir = get_chunks_dir(upload_id)
         total_chunks = metadata["total_chunks"]
         expected_size = metadata["total_size"]
 
-        # Verify every chunk file exists on disk
+        # Verify all expected chunk files exist on disk
         missing_chunks = []
         for i in range(total_chunks):
             chunk_path = os.path.join(chunks_dir, f"{i:06d}")
@@ -1523,68 +1623,89 @@ def upload_complete():
                 "missing_chunks": missing_chunks
             }), 400
 
-        # Stream assembly into temporary file inside cache
-        assembled_tmp = os.path.join(cache_dir, "assembled.tmp")
-        hasher = hashlib.sha256()
-        assembled_size = 0
+        # Transition status to assembling
+        metadata["status"] = "assembling"
+        metadata["updated_at"] = time.time()
+        save_metadata(upload_id, metadata)
 
-        try:
-            with open(assembled_tmp, "wb") as outfile:
-                for i in range(total_chunks):
-                    chunk_path = os.path.join(chunks_dir, f"{i:06d}")
-                    with open(chunk_path, "rb") as infile:
-                        while True:
-                            buffer = infile.read(64 * 1024)  # 64 KB streaming buffer
-                            if not buffer:
-                                break
-                            outfile.write(buffer)
-                            hasher.update(buffer)
-                            assembled_size += len(buffer)
-                    
-                    # Flush to disk
-                    outfile.flush()
+    # -------------------------------------------------------------------------
+    # PHASE 2: Streaming Assembly & Hashing (NO LOCK HELD - NON-BLOCKING)
+    # -------------------------------------------------------------------------
+    assembled_tmp = os.path.join(cache_dir, "assembled.tmp")
+    hasher = hashlib.sha256()
+    assembled_size = 0
+    assembly_error = None
 
-            # Verify assembled size
-            if assembled_size != expected_size:
-                logger.error(f"UPLOAD FAILED: upload_id={upload_id} assembled size {assembled_size} != expected {expected_size}")
-                if os.path.exists(assembled_tmp):
-                    os.remove(assembled_tmp)
-                return jsonify({
-                    "success": False,
-                    "error": f"Assembled file size verification failed (expected {expected_size} B, got {assembled_size} B)"
-                }), 400
+    try:
+        with open(assembled_tmp, "wb") as outfile:
+            for i in range(total_chunks):
+                chunk_path = os.path.join(chunks_dir, f"{i:06d}")
+                with open(chunk_path, "rb") as infile:
+                    while True:
+                        buffer = infile.read(64 * 1024)  # 64 KB streaming buffer
+                        if not buffer:
+                            break
+                        outfile.write(buffer)
+                        hasher.update(buffer)
+                        assembled_size += len(buffer)
+                outfile.flush()
 
-            # Verify hash if client provided one
+        if assembled_size != expected_size:
+            assembly_error = f"Assembled file size verification failed (expected {expected_size} B, got {assembled_size} B)"
+        else:
             client_hash = metadata.get("file_hash")
             calculated_hash = hasher.hexdigest()
             if client_hash and client_hash.lower() != calculated_hash.lower():
-                logger.error(f"UPLOAD FAILED: upload_id={upload_id} SHA-256 hash mismatch! ({calculated_hash} != {client_hash})")
-                if os.path.exists(assembled_tmp):
-                    os.remove(assembled_tmp)
-                return jsonify({
-                    "success": False,
-                    "error": "File SHA-256 integrity verification failed"
-                }), 400
+                assembly_error = f"File SHA-256 integrity verification failed ({calculated_hash} != {client_hash})"
 
-            # Find safe unique filename in uploads/ to prevent collision
-            final_filename = get_unique_filename(UPLOAD_DIR, metadata["safe_filename"])
-            final_dest = os.path.join(UPLOAD_DIR, final_filename)
+    except Exception as e:
+        assembly_error = f"Assembly streaming failed: {str(e)}"
 
-            # Move assembled file into uploads/
-            shutil.move(assembled_tmp, final_dest)
-
-            # Clean cache directory
-            shutil.rmtree(cache_dir, ignore_errors=True)
-
-        except Exception as e:
-            logger.error(f"UPLOAD FAILED during assembly for upload_id={upload_id}: {e}")
+    # -------------------------------------------------------------------------
+    # PHASE 3: Re-verify State, Handle Cancel Race, & Finalize (Holding Lock)
+    # -------------------------------------------------------------------------
+    with upload_lock_manager.acquire(upload_id):
+        # Check if upload was cancelled while assembly was running
+        latest_meta = load_metadata(upload_id)
+        if not latest_meta or latest_meta.get("status") == "cancelled":
             if os.path.exists(assembled_tmp):
                 try:
                     os.remove(assembled_tmp)
                 except OSError:
                     pass
-            return jsonify({"success": False, "error": f"Assembly failed: {str(e)}"}), 500
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            logger.info(f"CANCEL WON RACE: upload_id={upload_id} cancelled during assembly. Purged.")
+            return jsonify({"success": False, "error": "Upload was cancelled during assembly"}), 400
 
+        if assembly_error:
+            logger.error(f"UPLOAD FAILED: upload_id={upload_id} {assembly_error}")
+            if os.path.exists(assembled_tmp):
+                try:
+                    os.remove(assembled_tmp)
+                except OSError:
+                    pass
+            latest_meta["status"] = "failed"
+            latest_meta["updated_at"] = time.time()
+            save_metadata(upload_id, latest_meta)
+            return jsonify({"success": False, "error": assembly_error}), 400
+
+        # Atomic collision-safe final filename generation
+        with upload_lock_manager.filename_lock():
+            final_filename = get_unique_filename(UPLOAD_DIR, latest_meta["safe_filename"])
+            final_dest = os.path.join(UPLOAD_DIR, final_filename)
+            
+            # Atomically move assembled file into uploads/
+            shutil.move(assembled_tmp, final_dest)
+
+        # Mark completed and delete cache
+        latest_meta["status"] = "completed"
+        latest_meta["safe_filename"] = final_filename
+        latest_meta["updated_at"] = time.time()
+        save_metadata(upload_id, latest_meta)
+
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+    calculated_hash = hasher.hexdigest()
     logger.info(f"UPLOAD COMPLETED: upload_id={upload_id}, saved='{final_filename}', size={assembled_size} bytes, sha256={calculated_hash}")
     return jsonify({
         "success": True,
@@ -1606,9 +1727,16 @@ def upload_cancel(upload_id):
     if not cache_dir:
         return jsonify({"success": False, "error": "Invalid upload path"}), 400
 
-    with metadata_lock:
+    with upload_lock_manager.acquire(upload_id):
         if os.path.exists(cache_dir):
             try:
+                # Mark cancelled in metadata if possible before rmtree
+                meta = load_metadata(upload_id)
+                if meta:
+                    meta["status"] = "cancelled"
+                    meta["updated_at"] = time.time()
+                    save_metadata(upload_id, meta)
+
                 shutil.rmtree(cache_dir, ignore_errors=True)
                 logger.info(f"UPLOAD CANCELLED: upload_id={upload_id}. Entire cache deleted.")
                 return jsonify({"success": True, "message": "Upload cancelled and cache purged successfully"}), 200
@@ -1622,34 +1750,17 @@ def upload_cancel(upload_id):
 @app.route('/download/<path:filename>')
 def download_file(filename):
     """Securely serves completed files strictly from uploads/."""
-    # Prevent path traversal
     safe_name = os.path.basename(filename)
-    target_path = os.path.abspath(os.path.join(UPLOAD_DIR, safe_name))
+    target_path = os.path.join(UPLOAD_DIR, safe_name)
     
-    if not target_path.startswith(os.path.abspath(UPLOAD_DIR)):
+    # Path containment check
+    if not is_safe_path(UPLOAD_DIR, target_path):
         abort(403)
         
     if not os.path.exists(target_path) or not os.path.isfile(target_path):
         abort(404)
         
     return send_from_directory(UPLOAD_DIR, safe_name, as_attachment=True)
-
-
-# Fallback for single-request legacy upload (maintains backwards compatibility)
-@app.route('/upload', methods=['POST'])
-def legacy_upload():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
-
-    file = request.files['file']
-    if not file or file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-
-    safe_name = get_unique_filename(UPLOAD_DIR, file.filename)
-    filepath = os.path.join(UPLOAD_DIR, safe_name)
-    file.save(filepath)
-    logger.info(f"LEGACY UPLOAD: Saved '{safe_name}' directly into uploads/")
-    return jsonify({"message": f"{safe_name} uploaded successfully", "filename": safe_name}), 200
 
 
 # -----------------------------------------------------------------------------
