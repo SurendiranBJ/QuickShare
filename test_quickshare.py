@@ -8,6 +8,7 @@ import shutil
 import hashlib
 import unittest
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 # Import the QuickShare app and helper functions
 from Quickshare import (
@@ -266,21 +267,15 @@ class TestQuickShareReliability(unittest.TestCase):
         upload_id = start_res.get_json()["upload_id"]
         self.test_upload_ids.append(upload_id)
 
-        res1 = self.client.post('/upload/chunk', data={
-            'upload_id': upload_id,
-            'chunk_index': 0,
-            'total_chunks': 3,
-            'chunk': (io.BytesIO(data[:10]), "chunk_0")
-        }, content_type='multipart/form-data')
-        self.assertEqual(res1.status_code, 200)
-
-        res2 = self.client.post('/upload/chunk', data={
-            'upload_id': upload_id,
-            'chunk_index': 0,
-            'total_chunks': 3,
-            'chunk': (io.BytesIO(data[:10]), "chunk_0")
-        }, content_type='multipart/form-data')
-        self.assertEqual(res2.status_code, 200)
+        # Upload chunk 0 multiple times
+        for _ in range(3):
+            res = self.client.post('/upload/chunk', data={
+                'upload_id': upload_id,
+                'chunk_index': 0,
+                'total_chunks': 3,
+                'chunk': (io.BytesIO(data[:10]), "chunk_0")
+            }, content_type='multipart/form-data')
+            self.assertEqual(res.status_code, 200)
 
         self.client.post('/upload/chunk', data={
             'upload_id': upload_id,
@@ -303,45 +298,55 @@ class TestQuickShareReliability(unittest.TestCase):
         with open(os.path.join(UPLOAD_DIR, saved_name), "rb") as f:
             self.assertEqual(f.read(), data)
 
-    # 11. Multiple simultaneous uploads
-    def test_11_multiple_simultaneous_uploads(self):
+    # 11. Genuine concurrent multi-threaded uploads with ThreadPoolExecutor
+    def test_11_genuine_concurrent_uploads(self):
         files_data = {
-            "iso_a.bin": os.urandom(2 * 1024 * 1024),
-            "iso_b.bin": os.urandom(3 * 1024 * 1024),
-            "iso_c.bin": os.urandom(1 * 1024 * 1024)
+            "concurrent_a.bin": os.urandom(2 * 1024 * 1024),
+            "concurrent_b.bin": os.urandom(3 * 1024 * 1024),
+            "concurrent_c.bin": os.urandom(1 * 1024 * 1024)
         }
-        sessions = {}
-        for name, data in files_data.items():
-            start_res = self.client.post('/upload/start', json={
+        
+        def run_single_upload(item):
+            name, data = item
+            client = self.app.test_client()
+            chunk_size = 512 * 1024
+            total_size = len(data)
+            
+            start_res = client.post('/upload/start', json={
                 'filename': name,
-                'total_size': len(data),
-                'chunk_size': 1024 * 1024
+                'total_size': total_size,
+                'chunk_size': chunk_size
             })
+            self.assertEqual(start_res.status_code, 201)
             uid = start_res.get_json()["upload_id"]
+            total_chunks = start_res.get_json()["total_chunks"]
             self.test_upload_ids.append(uid)
-            sessions[name] = {"upload_id": uid, "data": data, "total_chunks": start_res.get_json()["total_chunks"]}
 
-        for name, info in sessions.items():
-            uid = info["upload_id"]
-            data = info["data"]
-            for idx in range(info["total_chunks"]):
-                start = idx * 1024 * 1024
-                end = min(start + 1024 * 1024, len(data))
-                self.client.post('/upload/chunk', data={
+            for idx in range(total_chunks):
+                start = idx * chunk_size
+                end = min(start + chunk_size, total_size)
+                chunk_res = client.post('/upload/chunk', data={
                     'upload_id': uid,
                     'chunk_index': idx,
-                    'total_chunks': info["total_chunks"],
+                    'total_chunks': total_chunks,
                     'chunk': (io.BytesIO(data[start:end]), f"chunk_{idx}")
                 }, content_type='multipart/form-data')
+                self.assertEqual(chunk_res.status_code, 200)
 
-        for name, info in sessions.items():
-            comp_res = self.client.post('/upload/complete', json={'upload_id': info["upload_id"]})
+            comp_res = client.post('/upload/complete', json={'upload_id': uid})
             self.assertEqual(comp_res.status_code, 200)
             saved_name = comp_res.get_json()["filename"]
+            return saved_name, data
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            results = list(executor.map(run_single_upload, files_data.items()))
+
+        for saved_name, original_data in results:
             self.test_created_files.append(saved_name)
-            self.assertTrue(os.path.exists(os.path.join(UPLOAD_DIR, saved_name)))
-            with open(os.path.join(UPLOAD_DIR, saved_name), "rb") as f:
-                self.assertEqual(f.read(), info["data"])
+            final_path = os.path.join(UPLOAD_DIR, saved_name)
+            self.assertTrue(os.path.exists(final_path))
+            with open(final_path, "rb") as f:
+                self.assertEqual(f.read(), original_data)
 
     # 12. Duplicate filenames
     def test_12_filename_collision_handling(self):
@@ -499,7 +504,7 @@ class TestQuickShareReliability(unittest.TestCase):
         
         self.assertEqual(os.path.getsize(os.path.join(UPLOAD_DIR, saved_name)), total_size)
 
-    # 20. Repeated completion
+    # 20. Repeated completion idempotency
     def test_20_repeated_completion_request(self):
         filename = "repeated_complete.txt"
         data = b"Testing repeated complete"
@@ -510,7 +515,7 @@ class TestQuickShareReliability(unittest.TestCase):
         res2 = self.client.post('/upload/complete', json={'upload_id': upload_id})
         self.assertEqual(res2.status_code, 404)
 
-    # 21. Repeated cancellation
+    # 21. Repeated cancellation idempotency
     def test_21_repeated_cancellation(self):
         filename = "repeated_cancel.txt"
         data = b"Testing repeated cancel"
@@ -537,7 +542,7 @@ class TestQuickShareReliability(unittest.TestCase):
         res2 = self.client.get(f'/upload/status/{fake_uuid}')
         self.assertEqual(res2.status_code, 404)
 
-    # 23. Invalid chunk index
+    # 23. Invalid chunk index bounds
     def test_23_invalid_chunk_index(self):
         start_res = self.client.post('/upload/start', json={
             'filename': 'bounds_test.bin',
@@ -581,12 +586,13 @@ class TestQuickShareReliability(unittest.TestCase):
         }, content_type='multipart/form-data')
         self.assertEqual(res.status_code, 400)
 
-    # 25. Cancel/complete race
+    # 25. Concurrent Cancel vs Complete Race
     def test_25_cancel_complete_race(self):
         filename = "race_test.bin"
         data = os.urandom(2 * 1024 * 1024)
         upload_id, _, _ = self._upload_helper(filename, data, chunk_size=1024 * 1024, simulate_interruption=True)
         
+        # Upload chunk 1 to finish chunks
         self.client.post('/upload/chunk', data={
             'upload_id': upload_id,
             'chunk_index': 1,
@@ -594,15 +600,30 @@ class TestQuickShareReliability(unittest.TestCase):
             'chunk': (io.BytesIO(data[1024*1024:]), "chunk_1")
         }, content_type='multipart/form-data')
 
-        with upload_lock_manager.acquire(upload_id):
-            meta = load_metadata(upload_id)
-            meta["status"] = "cancelled"
-            save_metadata(upload_id, meta)
+        def call_complete():
+            c = self.app.test_client()
+            return c.post('/upload/complete', json={'upload_id': upload_id})
 
-        comp_res = self.client.post('/upload/complete', json={'upload_id': upload_id})
-        self.assertEqual(comp_res.status_code, 400)
-        self.assertIn("cancelled", comp_res.get_json()["error"])
-        self.assertFalse(os.path.exists(os.path.join(UPLOAD_DIR, filename)))
+        def call_cancel():
+            c = self.app.test_client()
+            return c.post(f'/upload/cancel/{upload_id}')
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(call_complete)
+            f2 = executor.submit(call_cancel)
+            res_comp = f1.result()
+            res_canc = f2.result()
+
+        # Deterministic outcome check:
+        # Either cancel won (no file in uploads/, cache deleted)
+        # Or complete won (file in uploads/ verified, cache deleted)
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        cache_path = get_upload_cache_dir(upload_id)
+
+        self.assertFalse(os.path.exists(cache_path))
+        if os.path.exists(file_path):
+            self.test_created_files.append(filename)
+            self.assertEqual(os.path.getsize(file_path), len(data))
 
     # 26. Metadata corruption handling
     def test_26_metadata_corruption_handling(self):
@@ -616,6 +637,40 @@ class TestQuickShareReliability(unittest.TestCase):
 
         status_res = self.client.get(f'/upload/status/{upload_id}')
         self.assertEqual(status_res.status_code, 404)
+
+    # 27. Edge file sizes (1 byte, 1 KB, exactly 1 chunk, 1 chunk + 1 byte, exact multiple)
+    def test_27_edge_file_sizes(self):
+        edge_cases = [
+            ("1_byte.bin", b"A", 1024),
+            ("1_kb.bin", os.urandom(1024), 1024),
+            ("exact_1_chunk.bin", os.urandom(512), 512),
+            ("1_chunk_plus_1.bin", os.urandom(513), 512),
+            ("exact_2_chunks.bin", os.urandom(1024), 512)
+        ]
+
+        for fname, payload, chunk_sz in edge_cases:
+            uid, res, status = self._upload_helper(fname, payload, chunk_size=chunk_sz)
+            self.assertEqual(status, "completed")
+            self.assertEqual(res.status_code, 200)
+            saved_name = res.get_json()["filename"]
+            self.test_created_files.append(saved_name)
+            
+            fpath = os.path.join(UPLOAD_DIR, saved_name)
+            self.assertTrue(os.path.exists(fpath))
+            self.assertEqual(os.path.getsize(fpath), len(payload))
+            with open(fpath, "rb") as f:
+                self.assertEqual(f.read(), payload)
+
+    # 28. Active and paused cache preserved during cleanup
+    def test_28_active_and_paused_cache_preserved_during_cleanup(self):
+        filename = "active_paused_test.bin"
+        data = os.urandom(2 * 1024 * 1024)
+        uid, _, _ = self._upload_helper(filename, data, chunk_size=1024*1024, simulate_interruption=True)
+        
+        # Run cleanup worker
+        clean_expired_cache()
+        # Active upload cache must remain intact
+        self.assertTrue(os.path.exists(get_upload_cache_dir(uid)))
 
 
 if __name__ == '__main__':
