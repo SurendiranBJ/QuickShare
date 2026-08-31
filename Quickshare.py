@@ -1024,20 +1024,52 @@ UPLOAD_HTML = """
             background: var(--bg-surface-hover);
         }
 
-        /* Category Filter Pills */
+        /* Dedicated Horizontal Filter Scroll Container */
+        .filter-scroll-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+        }
+
         .filter-pills-bar {
             display: flex;
             align-items: center;
-            gap: 0.4rem;
+            gap: 0.45rem;
             overflow-x: auto;
+            overflow-y: hidden;
             width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            white-space: nowrap;
             scrollbar-width: none;
             -ms-overflow-style: none;
-            padding: 0.15rem 0;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-x;
+            overscroll-behavior-x: contain;
+            padding: 0.2rem 0;
         }
 
         .filter-pills-bar::-webkit-scrollbar {
             display: none;
+        }
+
+        .filter-fade-right {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 32px;
+            background: linear-gradient(to right, rgba(17, 19, 24, 0), var(--bg-surface) 90%);
+            pointer-events: none;
+            opacity: 1;
+            transition: opacity 0.2s ease;
+        }
+
+        .filter-fade-right.hidden {
+            opacity: 0;
         }
 
         .filter-pill {
@@ -1045,13 +1077,17 @@ UPLOAD_HTML = """
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-sm);
             color: var(--text-secondary);
-            padding: 0.28rem 0.65rem;
+            padding: 0.35rem 0.75rem;
             font-size: 0.78rem;
             font-weight: 500;
             cursor: pointer;
             transition: var(--transition-smooth);
             white-space: nowrap;
-            flex-shrink: 0;
+            flex: 0 0 auto;
+            min-height: 34px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .filter-pill:hover, .filter-pill:focus-visible {
@@ -1415,6 +1451,16 @@ UPLOAD_HTML = """
                 width: 100%;
                 justify-content: center;
             }
+
+            .filter-scroll-wrapper {
+                margin: 0;
+            }
+
+            .filter-pill {
+                min-height: 38px;
+                padding: 0.4rem 0.85rem;
+                font-size: 0.8rem;
+            }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -1501,22 +1547,25 @@ UPLOAD_HTML = """
                     </div>
                 </div>
 
-                <div class="filter-pills-bar" role="tablist" aria-label="File Category Filters">
-                    <button class="filter-pill active" data-category="all" onclick="setCategoryFilter('all', this)">All</button>
-                    <button class="filter-pill" data-category="images" onclick="setCategoryFilter('images', this)">Images</button>
-                    <button class="filter-pill" data-category="videos" onclick="setCategoryFilter('videos', this)">Videos</button>
-                    <button class="filter-pill" data-category="audio" onclick="setCategoryFilter('audio', this)">Audio</button>
-                    <button class="filter-pill" data-category="documents" onclick="setCategoryFilter('documents', this)">Documents</button>
-                    <button class="filter-pill" data-category="archives" onclick="setCategoryFilter('archives', this)">Archives</button>
-                    <button class="filter-pill" data-category="code" onclick="setCategoryFilter('code', this)">Code</button>
-                    <button class="filter-pill" data-category="applications" onclick="setCategoryFilter('applications', this)">Applications</button>
-                    <button class="filter-pill" data-category="other" onclick="setCategoryFilter('other', this)">Other</button>
+                <div class="filter-scroll-wrapper">
+                    <div class="filter-pills-bar" id="filterPillsBar" role="tablist" aria-label="File Category Filters" onscroll="updateFilterScrollIndicator()">
+                        <button class="filter-pill active" data-category="all" aria-pressed="true" onclick="setCategoryFilter('all', this)">All</button>
+                        <button class="filter-pill" data-category="images" aria-pressed="false" onclick="setCategoryFilter('images', this)">Images</button>
+                        <button class="filter-pill" data-category="videos" aria-pressed="false" onclick="setCategoryFilter('videos', this)">Videos</button>
+                        <button class="filter-pill" data-category="audio" aria-pressed="false" onclick="setCategoryFilter('audio', this)">Audio</button>
+                        <button class="filter-pill" data-category="documents" aria-pressed="false" onclick="setCategoryFilter('documents', this)">Documents</button>
+                        <button class="filter-pill" data-category="archives" aria-pressed="false" onclick="setCategoryFilter('archives', this)">Archives</button>
+                        <button class="filter-pill" data-category="code" aria-pressed="false" onclick="setCategoryFilter('code', this)">Code</button>
+                        <button class="filter-pill" data-category="applications" aria-pressed="false" onclick="setCategoryFilter('applications', this)">Applications</button>
+                        <button class="filter-pill" data-category="other" aria-pressed="false" onclick="setCategoryFilter('other', this)">Other</button>
+                    </div>
+                    <div class="filter-fade-right" id="filterFadeRight" aria-hidden="true"></div>
                 </div>
             </div>
 
             <div id="noFilterMatches" class="empty-state" style="display: none;">
-                <div class="empty-state-title">No matching files</div>
-                <div class="empty-state-subtitle">Try another search query or file category.</div>
+                <div class="empty-state-title" id="emptyStateTitle">No matching files</div>
+                <div class="empty-state-subtitle" id="emptyStateSubtitle">Try another search query or file category.</div>
             </div>
 
             <table class="file-table" id="fileTable">
@@ -1719,11 +1768,52 @@ document.addEventListener('keydown', (e) => {
 // ---------------------------------------------------------------------------
 // File Category Filter & Search Logic
 // ---------------------------------------------------------------------------
+const categoryLabelMap = {
+    'all': 'matching',
+    'images': 'image',
+    'videos': 'video',
+    'audio': 'audio',
+    'documents': 'document',
+    'archives': 'archive',
+    'code': 'code',
+    'applications': 'application',
+    'other': 'other'
+};
+
+function updateFilterScrollIndicator() {
+    const bar = document.getElementById('filterPillsBar');
+    const fade = document.getElementById('filterFadeRight');
+    if (!bar || !fade) return;
+    const isAtEnd = (bar.scrollLeft + bar.clientWidth) >= (bar.scrollWidth - 6);
+    if (isAtEnd || bar.scrollWidth <= bar.clientWidth) {
+        fade.classList.add('hidden');
+    } else {
+        fade.classList.remove('hidden');
+    }
+}
+
+window.addEventListener('resize', updateFilterScrollIndicator);
+window.addEventListener('DOMContentLoaded', updateFilterScrollIndicator);
+
 function setCategoryFilter(category, buttonEl) {
     currentCategory = category;
-    document.querySelectorAll('.filter-pill').forEach(btn => btn.classList.remove('active'));
-    if (buttonEl) buttonEl.classList.add('active');
+    document.querySelectorAll('.filter-pill').forEach(btn => {
+        btn.classList.remove('active');
+        btn.setAttribute('aria-pressed', 'false');
+    });
+    if (buttonEl) {
+        buttonEl.classList.add('active');
+        buttonEl.setAttribute('aria-pressed', 'true');
+        try {
+            buttonEl.scrollIntoView({
+                behavior: 'smooth',
+                inline: 'center',
+                block: 'nearest'
+            });
+        } catch(e) {}
+    }
     applyFilters();
+    setTimeout(updateFilterScrollIndicator, 150);
 }
 
 function applyFilters() {
@@ -1751,11 +1841,30 @@ function applyFilters() {
     if (fileCount) fileCount.textContent = visible;
 
     const noMatches = document.getElementById('noFilterMatches');
+    const emptyTitle = document.getElementById('emptyStateTitle');
+    const emptySubtitle = document.getElementById('emptyStateSubtitle');
     const fileTable = document.getElementById('fileTable');
+
     if (noMatches) {
         if (visible === 0 && rows.length > 0) {
             noMatches.style.display = 'flex';
             if (fileTable) fileTable.style.display = 'none';
+
+            if (emptyTitle && emptySubtitle) {
+                if (query) {
+                    emptyTitle.textContent = "No matching files";
+                    emptySubtitle.textContent = "Try another search query or file category.";
+                } else {
+                    const catSingular = categoryLabelMap[currentCategory] || 'matching';
+                    if (currentCategory === 'all') {
+                        emptyTitle.textContent = "No files available";
+                        emptySubtitle.textContent = "Upload files to get started.";
+                    } else {
+                        emptyTitle.textContent = `No ${catSingular} files`;
+                        emptySubtitle.textContent = `There are no ${catSingular} files available.`;
+                    }
+                }
+            }
         } else {
             noMatches.style.display = 'none';
             if (fileTable) fileTable.style.display = '';
