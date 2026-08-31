@@ -14,6 +14,10 @@ uploads/
 cache/
 *.tmp
 
+# Personal scratch scripts & local tests
+aura.py
+scratch/
+
 # OS / Editor temporary files
 .DS_Store
 Thumbs.db
