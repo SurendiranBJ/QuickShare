@@ -2913,7 +2913,11 @@ def upload_cancel(upload_id):
 
 @app.route('/download/<path:filename>')
 def download_file(filename):
-    """Securely serves completed files strictly from uploads/."""
+    """
+    Securely serves completed files strictly from uploads/.
+    Supports HTTP Range requests (RFC 7233 / 9110), streaming, and safe path resolution.
+    Never serves from cache/ or temporary files.
+    """
     safe_name = os.path.basename(filename)
     target_path = os.path.join(UPLOAD_DIR, safe_name)
     
@@ -2923,7 +2927,7 @@ def download_file(filename):
     if not os.path.exists(target_path) or not os.path.isfile(target_path):
         abort(404)
         
-    return send_from_directory(UPLOAD_DIR, safe_name, as_attachment=True)
+    return send_from_directory(UPLOAD_DIR, safe_name, as_attachment=True, conditional=True)
 
 
 # -----------------------------------------------------------------------------
