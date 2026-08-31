@@ -95,7 +95,7 @@ class UploadLockManager:
 upload_lock_manager = UploadLockManager()
 
 # -----------------------------------------------------------------------------
-# Helper Functions, LAN IP Discovery & File Type Classification
+# Helper Functions, LAN IP Discovery & Unified File Classification
 # -----------------------------------------------------------------------------
 def get_lan_ip():
     """Dynamically detects the primary LAN IP address of this machine."""
@@ -154,12 +154,14 @@ def format_bytes(size_bytes):
 
 def get_file_type_info(filename):
     """
-    Returns (category, type_label, bg_class, icon_type) based on filename extension.
+    Unified Single Source of Truth for File Type Detection:
+    Returns (category, label, badge_class, icon) based on filename extension.
+    Categories: 'images', 'videos', 'audio', 'documents', 'archives', 'code', 'applications', 'other'.
     Handles case-insensitivity, multiple dots, and files without extensions.
     """
     if not filename:
         return {
-            "category": "generic",
+            "category": "other",
             "label": "File",
             "badge_class": "file-generic",
             "icon": "generic"
@@ -179,18 +181,31 @@ def get_file_type_info(filename):
             ext = parts[1]
 
     EXT_MAP = {
-        # Video
-        "mp4": ("video", "Video · MP4", "file-video", "video"),
-        "mkv": ("video", "Video · MKV", "file-video", "video"),
-        "mov": ("video", "Video · QuickTime", "file-video", "video"),
-        "avi": ("video", "Video · AVI", "file-video", "video"),
-        "webm": ("video", "Video · WebM", "file-video", "video"),
-        "flv": ("video", "Video · FLV", "file-video", "video"),
-        "wmv": ("video", "Video · WMV", "file-video", "video"),
-        "m4v": ("video", "Video · M4V", "file-video", "video"),
-        "mpeg": ("video", "Video · MPEG", "file-video", "video"),
-        "mpg": ("video", "Video · MPG", "file-video", "video"),
-        "3gp": ("video", "Video · 3GP", "file-video", "video"),
+        # Images
+        "jpg": ("images", "Image · JPG", "file-image", "image"),
+        "jpeg": ("images", "Image · JPEG", "file-image", "image"),
+        "png": ("images", "Image · PNG", "file-image", "image"),
+        "gif": ("images", "Image · GIF", "file-image", "image"),
+        "webp": ("images", "Image · WebP", "file-image", "image"),
+        "bmp": ("images", "Image · BMP", "file-image", "image"),
+        "svg": ("images", "Vector · SVG", "file-image", "image"),
+        "tiff": ("images", "Image · TIFF", "file-image", "image"),
+        "tif": ("images", "Image · TIF", "file-image", "image"),
+        "ico": ("images", "Icon · ICO", "file-image", "image"),
+        "avif": ("images", "Image · AVIF", "file-image", "image"),
+        
+        # Videos
+        "mp4": ("videos", "Video · MP4", "file-video", "video"),
+        "mkv": ("videos", "Video · MKV", "file-video", "video"),
+        "mov": ("videos", "Video · QuickTime", "file-video", "video"),
+        "avi": ("videos", "Video · AVI", "file-video", "video"),
+        "webm": ("videos", "Video · WebM", "file-video", "video"),
+        "flv": ("videos", "Video · FLV", "file-video", "video"),
+        "wmv": ("videos", "Video · WMV", "file-video", "video"),
+        "m4v": ("videos", "Video · M4V", "file-video", "video"),
+        "mpeg": ("videos", "Video · MPEG", "file-video", "video"),
+        "mpg": ("videos", "Video · MPG", "file-video", "video"),
+        "3gp": ("videos", "Video · 3GP", "file-video", "video"),
         
         # Audio
         "mp3": ("audio", "Audio · MP3", "file-audio", "audio"),
@@ -202,29 +217,37 @@ def get_file_type_info(filename):
         "wma": ("audio", "Audio · WMA", "file-audio", "audio"),
         "opus": ("audio", "Audio · OPUS", "file-audio", "audio"),
         
-        # Image
-        "jpg": ("image", "Image · JPG", "file-image", "image"),
-        "jpeg": ("image", "Image · JPEG", "file-image", "image"),
-        "png": ("image", "Image · PNG", "file-image", "image"),
-        "gif": ("image", "Image · GIF", "file-image", "image"),
-        "webp": ("image", "Image · WebP", "file-image", "image"),
-        "bmp": ("image", "Image · BMP", "file-image", "image"),
-        "svg": ("image", "Vector · SVG", "file-image", "image"),
-        "tiff": ("image", "Image · TIFF", "file-image", "image"),
-        "tif": ("image", "Image · TIF", "file-image", "image"),
-        "ico": ("image", "Icon · ICO", "file-image", "image"),
-        "avif": ("image", "Image · AVIF", "file-image", "image"),
+        # Documents (PDF, Office, Text, Markdown)
+        "pdf": ("documents", "PDF Document", "file-pdf", "pdf"),
+        "txt": ("documents", "Plain Text", "file-text", "text"),
+        "md": ("documents", "Markdown Document", "file-text", "text"),
+        "markdown": ("documents", "Markdown Document", "file-text", "text"),
+        "log": ("documents", "Log File", "file-text", "text"),
+        "rtf": ("documents", "Rich Text Document", "file-text", "text"),
+        "doc": ("documents", "Word Document", "file-doc", "doc"),
+        "docx": ("documents", "Word Document", "file-doc", "doc"),
+        "odt": ("documents", "OpenDocument Text", "file-doc", "doc"),
+        "xls": ("documents", "Excel Spreadsheet", "file-sheet", "sheet"),
+        "xlsx": ("documents", "Excel Spreadsheet", "file-sheet", "sheet"),
+        "csv": ("documents", "CSV Spreadsheet", "file-sheet", "sheet"),
+        "ods": ("documents", "OpenDocument Spreadsheet", "file-sheet", "sheet"),
+        "ppt": ("documents", "PowerPoint Presentation", "file-pres", "pres"),
+        "pptx": ("documents", "PowerPoint Presentation", "file-pres", "pres"),
+        "odp": ("documents", "OpenDocument Presentation", "file-pres", "pres"),
         
-        # PDF
-        "pdf": ("pdf", "PDF Document", "file-pdf", "pdf"),
+        # Archives
+        "zip": ("archives", "ZIP Archive", "file-archive", "archive"),
+        "rar": ("archives", "RAR Archive", "file-archive", "archive"),
+        "7z": ("archives", "7Z Archive", "file-archive", "archive"),
+        "tar": ("archives", "TAR Archive", "file-archive", "archive"),
+        "gz": ("archives", "GZ Archive", "file-archive", "archive"),
+        "bz2": ("archives", "BZ2 Archive", "file-archive", "archive"),
+        "xz": ("archives", "XZ Archive", "file-archive", "archive"),
+        "tar.gz": ("archives", "Tarball Archive", "file-archive", "archive"),
+        "tar.bz2": ("archives", "Tarball Archive", "file-archive", "archive"),
+        "tar.xz": ("archives", "Tarball Archive", "file-archive", "archive"),
         
-        # Text
-        "txt": ("text", "Plain Text", "file-text", "text"),
-        "md": ("text", "Markdown Document", "file-text", "text"),
-        "markdown": ("text", "Markdown Document", "file-text", "text"),
-        "log": ("text", "Log File", "file-text", "text"),
-        
-        # Code / Development
+        # Code & Scripts
         "py": ("code", "Python Script", "file-code", "code"),
         "js": ("code", "JavaScript Source", "file-code", "code"),
         "jsx": ("code", "React JSX Source", "file-code", "code"),
@@ -251,54 +274,30 @@ def get_file_type_info(filename):
         "yml": ("code", "YAML File", "file-code", "code"),
         "sql": ("code", "SQL Database Script", "file-code", "code"),
         
-        # Archive
-        "zip": ("archive", "ZIP Archive", "file-archive", "archive"),
-        "rar": ("archive", "RAR Archive", "file-archive", "archive"),
-        "7z": ("archive", "7Z Archive", "file-archive", "archive"),
-        "tar": ("archive", "TAR Archive", "file-archive", "archive"),
-        "gz": ("archive", "GZ Archive", "file-archive", "archive"),
-        "bz2": ("archive", "BZ2 Archive", "file-archive", "archive"),
-        "xz": ("archive", "XZ Archive", "file-archive", "archive"),
-        "tar.gz": ("archive", "Tarball Archive", "file-archive", "archive"),
-        "tar.bz2": ("archive", "Tarball Archive", "file-archive", "archive"),
-        "tar.xz": ("archive", "Tarball Archive", "file-archive", "archive"),
+        # Applications / Executables
+        "exe": ("applications", "Application · EXE", "file-exe", "exe"),
+        "msi": ("applications", "Windows Installer", "file-exe", "exe"),
+        "apk": ("applications", "Android Package", "file-exe", "exe"),
+        "dmg": ("applications", "macOS Disk Image", "file-exe", "exe"),
+        "deb": ("applications", "Debian Package", "file-exe", "exe"),
+        "rpm": ("applications", "RPM Package", "file-exe", "exe"),
+        "app": ("applications", "macOS Application", "file-exe", "exe"),
         
-        # Executables / Applications
-        "exe": ("executable", "Application · EXE", "file-exe", "exe"),
-        "msi": ("executable", "Windows Installer", "file-exe", "exe"),
-        "app": ("executable", "macOS Application", "file-exe", "exe"),
-        "apk": ("executable", "Android Package", "file-exe", "exe"),
-        "dmg": ("executable", "Disk Image", "file-exe", "exe"),
-        "deb": ("executable", "Debian Package", "file-exe", "exe"),
-        "rpm": ("executable", "RPM Package", "file-exe", "exe"),
-        
-        # Office / Documents
-        "doc": ("document", "Word Document", "file-doc", "doc"),
-        "docx": ("document", "Word Document", "file-doc", "doc"),
-        "odt": ("document", "OpenDocument Text", "file-doc", "doc"),
-        "xls": ("spreadsheet", "Excel Spreadsheet", "file-sheet", "sheet"),
-        "xlsx": ("spreadsheet", "Excel Spreadsheet", "file-sheet", "sheet"),
-        "csv": ("spreadsheet", "CSV Spreadsheet", "file-sheet", "sheet"),
-        "ods": ("spreadsheet", "OpenDocument Spreadsheet", "file-sheet", "sheet"),
-        "ppt": ("presentation", "PowerPoint Presentation", "file-pres", "pres"),
-        "pptx": ("presentation", "PowerPoint Presentation", "file-pres", "pres"),
-        "odp": ("presentation", "OpenDocument Presentation", "file-pres", "pres"),
-        
-        # Design
-        "psd": ("design", "Photoshop Document", "file-design", "design"),
-        "ai": ("design", "Illustrator Artwork", "file-design", "design"),
-        "sketch": ("design", "Sketch Design", "file-design", "design"),
-        "fig": ("design", "Figma Design", "file-design", "design"),
+        # Design / Other
+        "psd": ("other", "Photoshop Document", "file-design", "design"),
+        "ai": ("other", "Illustrator Artwork", "file-design", "design"),
+        "sketch": ("other", "Sketch Design", "file-design", "design"),
+        "fig": ("other", "Figma Design", "file-design", "design"),
     }
 
     if ext in EXT_MAP:
         cat, label, bg, icon = EXT_MAP[ext]
         return {"category": cat, "label": label, "badge_class": bg, "icon": icon}
     
-    # Generic fallback
+    # Fallback to other
     display_ext = ext.upper() if ext else "FILE"
     return {
-        "category": "generic",
+        "category": "other",
         "label": f"File · {display_ext}" if ext else "Generic File",
         "badge_class": "file-generic",
         "icon": "generic"
@@ -477,7 +476,7 @@ if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
     cleanup_thread.start()
 
 # -----------------------------------------------------------------------------
-# Frontend HTML / UI Template (True Mobile-First Responsive Layout)
+# Frontend HTML / UI Template (Unified Connect Device + File Category Filters)
 # -----------------------------------------------------------------------------
 UPLOAD_HTML = """
 <!DOCTYPE html>
@@ -665,12 +664,6 @@ UPLOAD_HTML = """
             text-transform: uppercase;
             letter-spacing: 0.06em;
             color: var(--text-tertiary);
-        }
-
-        .section-actions {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
         }
 
         /* Dropzone Component */
@@ -949,7 +942,7 @@ UPLOAD_HTML = """
             flex-wrap: wrap;
         }
 
-        /* Available Files Section & Professional File Icon System */
+        /* Available Files Section & Filter System */
         .files-container {
             width: 100%;
             background: var(--bg-surface);
@@ -963,10 +956,16 @@ UPLOAD_HTML = """
             padding: 0.75rem 1rem;
             border-bottom: 1px solid var(--border-subtle);
             display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .toolbar-top-row {
+            display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 0.75rem;
-            flex-wrap: wrap;
+            width: 100%;
         }
 
         .search-box {
@@ -974,7 +973,6 @@ UPLOAD_HTML = """
             display: flex;
             align-items: center;
             width: 100%;
-            max-width: 320px;
         }
 
         .search-icon {
@@ -1001,6 +999,50 @@ UPLOAD_HTML = """
         .search-input:focus {
             border-color: var(--accent);
             background: var(--bg-surface-hover);
+        }
+
+        /* Category Filter Pills */
+        .filter-pills-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            overflow-x: auto;
+            width: 100%;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            padding: 0.15rem 0;
+        }
+
+        .filter-pills-bar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .filter-pill {
+            background: var(--bg-surface-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            padding: 0.28rem 0.65rem;
+            font-size: 0.78rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .filter-pill:hover, .filter-pill:focus-visible {
+            background: var(--bg-surface-hover);
+            border-color: var(--border-strong);
+            color: var(--text-primary);
+            outline: none;
+        }
+
+        .filter-pill.active {
+            background: var(--accent);
+            color: #ffffff;
+            border-color: var(--accent);
+            font-weight: 600;
         }
 
         .file-table {
@@ -1137,7 +1179,7 @@ UPLOAD_HTML = """
             color: var(--text-tertiary);
         }
 
-        /* Modal Dialog */
+        /* Unified Connect Device Modal */
         .modal-overlay {
             position: fixed;
             inset: 0;
@@ -1266,7 +1308,7 @@ UPLOAD_HTML = """
         }
 
         /* -----------------------------------------------------------------
-           MOBILE-FIRST PURPOSE-BUILT RESPONSIVE LAYOUT (< 640px)
+           MOBILE RESPONSIVE LAYOUT (< 640px)
         ----------------------------------------------------------------- */
         @media (max-width: 640px) {
             .workspace {
@@ -1280,10 +1322,6 @@ UPLOAD_HTML = """
             .dropzone-container {
                 padding: 2rem 1rem;
                 min-height: 180px;
-            }
-
-            .search-box {
-                max-width: 100%;
             }
 
             .btn {
@@ -1374,26 +1412,19 @@ UPLOAD_HTML = """
         </a>
 
         <div class="nav-actions">
-            <button class="btn btn-sm" onclick="copyLanUrl()" aria-label="Copy LAN URL">
-                <svg class="svg-icon" viewBox="0 0 24 24">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-                <span>Copy Address</span>
-            </button>
-            <button class="btn btn-sm btn-primary" onclick="openQrModal()" aria-label="Show QR Code for mobile connection">
+            <div class="lan-pill-btn" onclick="openConnectModal()" title="Connected to Local Network">
+                <div class="status-dot"></div>
+                <span class="lan-ip-text">{{ lan_ip }}:{{ port }}</span>
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="openConnectModal()" aria-label="Connect another device">
                 <svg class="svg-icon" viewBox="0 0 24 24">
                     <rect x="3" y="3" width="7" height="7"></rect>
                     <rect x="14" y="3" width="7" height="7"></rect>
                     <rect x="14" y="14" width="7" height="7"></rect>
                     <rect x="3" y="14" width="7" height="7"></rect>
                 </svg>
-                <span>Show QR</span>
+                <span>Connect device</span>
             </button>
-            <div class="lan-pill-btn" onclick="openQrModal()" title="Connected to Local Network">
-                <div class="status-dot"></div>
-                <span class="lan-ip-text">{{ lan_ip }}:{{ port }}</span>
-            </div>
         </div>
     </div>
 </nav>
@@ -1428,33 +1459,41 @@ UPLOAD_HTML = """
         <div class="transfer-list" id="uploadQueue" style="margin-top: 1rem;" aria-live="polite"></div>
     </section>
 
-    <!-- Available Files Section -->
+    <!-- Available Files Section with File Category Filtering -->
     <section aria-labelledby="filesSectionHeading" style="width: 100%;">
         <div class="section-header">
             <h2 class="section-title" id="filesSectionHeading">Available Files (<span id="fileCount">{{ files|length }}</span>)</h2>
-            <div class="section-actions">
-                <button class="btn btn-sm" onclick="openQrModal()">
-                    <svg class="svg-icon" viewBox="0 0 24 24">
-                        <rect x="3" y="3" width="7" height="7"></rect>
-                        <rect x="14" y="3" width="7" height="7"></rect>
-                        <rect x="14" y="14" width="7" height="7"></rect>
-                        <rect x="3" y="14" width="7" height="7"></rect>
-                    </svg>
-                    <span>Connect Phone</span>
-                </button>
-            </div>
         </div>
 
         <div class="files-container">
             {% if files %}
             <div class="files-toolbar">
-                <div class="search-box">
-                    <svg class="search-icon svg-icon" viewBox="0 0 24 24">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                    <input type="search" id="fileSearch" class="search-input" placeholder="Search files..." aria-label="Search available files" oninput="filterFiles()">
+                <div class="toolbar-top-row">
+                    <div class="search-box">
+                        <svg class="search-icon svg-icon" viewBox="0 0 24 24">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="search" id="fileSearch" class="search-input" placeholder="Search files..." aria-label="Search available files" oninput="applyFilters()">
+                    </div>
                 </div>
+
+                <div class="filter-pills-bar" role="tablist" aria-label="File Category Filters">
+                    <button class="filter-pill active" data-category="all" onclick="setCategoryFilter('all', this)">All</button>
+                    <button class="filter-pill" data-category="images" onclick="setCategoryFilter('images', this)">Images</button>
+                    <button class="filter-pill" data-category="videos" onclick="setCategoryFilter('videos', this)">Videos</button>
+                    <button class="filter-pill" data-category="audio" onclick="setCategoryFilter('audio', this)">Audio</button>
+                    <button class="filter-pill" data-category="documents" onclick="setCategoryFilter('documents', this)">Documents</button>
+                    <button class="filter-pill" data-category="archives" onclick="setCategoryFilter('archives', this)">Archives</button>
+                    <button class="filter-pill" data-category="code" onclick="setCategoryFilter('code', this)">Code</button>
+                    <button class="filter-pill" data-category="applications" onclick="setCategoryFilter('applications', this)">Applications</button>
+                    <button class="filter-pill" data-category="other" onclick="setCategoryFilter('other', this)">Other</button>
+                </div>
+            </div>
+
+            <div id="noFilterMatches" class="empty-state" style="display: none;">
+                <div class="empty-state-title">No matching files</div>
+                <div class="empty-state-subtitle">Try another search query or file category.</div>
             </div>
 
             <table class="file-table" id="fileTable">
@@ -1468,7 +1507,7 @@ UPLOAD_HTML = """
                 </thead>
                 <tbody>
                     {% for f in files %}
-                    <tr class="file-row" data-filename="{{ f.name|lower }}" data-type="{{ f.type_info.label|lower }}">
+                    <tr class="file-row" data-filename="{{ f.name|lower }}" data-type="{{ f.type_info.label|lower }}" data-category="{{ f.type_info.category }}">
                         <td>
                             <div class="file-name-cell">
                                 <div class="file-icon-box {{ f.type_info.badge_class }}" aria-hidden="true">
@@ -1530,12 +1569,12 @@ UPLOAD_HTML = """
     </section>
 </main>
 
-<!-- Local Network QR Modal -->
-<div class="modal-overlay" id="qrModal" onclick="closeQrModal(event)">
+<!-- Unified Connect Device Modal -->
+<div class="modal-overlay" id="connectModal" onclick="closeConnectModal(event)">
     <div class="modal-dialog" onclick="event.stopPropagation()">
         <div class="modal-header">
-            <span class="modal-title">Connect Mobile Device</span>
-            <button class="btn btn-icon-only" onclick="closeQrModal()" aria-label="Close dialog">
+            <span class="modal-title">Connect another device</span>
+            <button class="btn btn-icon-only" onclick="closeConnectModal()" aria-label="Close dialog">
                 <svg class="svg-icon" viewBox="0 0 24 24">
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1544,7 +1583,7 @@ UPLOAD_HTML = """
         </div>
 
         <div class="modal-subtitle">
-            Scan this code with your phone camera to access QuickShare over Wi-Fi
+            Scan this QR code with your phone camera or open the address in any browser
         </div>
 
         <div class="qr-card">
@@ -1562,7 +1601,7 @@ UPLOAD_HTML = """
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                 </svg>
-                <span id="copyBtnText">Copy</span>
+                <span id="copyBtnText">Copy address</span>
             </button>
         </div>
 
@@ -1584,6 +1623,7 @@ const MAX_CHUNK_RETRIES = 5;        // Max retry attempts per chunk with exponen
 const STORAGE_KEY = "quickshare_active_uploads";
 
 let activeUploaders = new Map();
+let currentCategory = 'all';
 
 // Helper: Format bytes
 function formatBytes(bytes) {
@@ -1629,28 +1669,76 @@ function copyLanUrl() {
     const url = document.getElementById("lanUrlText").textContent;
     navigator.clipboard.writeText(url).then(() => {
         const copyText = document.getElementById("copyBtnText");
-        if (copyText) copyText.textContent = "Copied";
+        if (copyText) copyText.textContent = "Address copied";
         showToast("Address copied to clipboard");
-        if (copyText) setTimeout(() => { copyText.textContent = "Copy"; }, 2000);
+        if (copyText) setTimeout(() => { copyText.textContent = "Copy address"; }, 2000);
     }).catch(() => {
         showToast("Address: " + url);
     });
 }
 
-function openQrModal() {
-    document.getElementById("qrModal").style.display = "flex";
+// Unified Connect Device Modal controls
+function openConnectModal() {
+    document.getElementById("connectModal").style.display = "flex";
 }
 
-function closeQrModal(event) {
-    document.getElementById("qrModal").style.display = "none";
+function closeConnectModal(event) {
+    document.getElementById("connectModal").style.display = "none";
 }
 
 // Keyboard escape to close modal
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-        closeQrModal();
+        closeConnectModal();
     }
 });
+
+// ---------------------------------------------------------------------------
+// File Category Filter & Search Logic
+// ---------------------------------------------------------------------------
+function setCategoryFilter(category, buttonEl) {
+    currentCategory = category;
+    document.querySelectorAll('.filter-pill').forEach(btn => btn.classList.remove('active'));
+    if (buttonEl) buttonEl.classList.add('active');
+    applyFilters();
+}
+
+function applyFilters() {
+    const query = document.getElementById('fileSearch') ? document.getElementById('fileSearch').value.toLowerCase().trim() : '';
+    const rows = document.querySelectorAll('.file-row');
+    let visible = 0;
+
+    rows.forEach(row => {
+        const fname = row.getAttribute('data-filename') || '';
+        const ftype = row.getAttribute('data-type') || '';
+        const fcat = row.getAttribute('data-category') || 'other';
+
+        const matchesCategory = (currentCategory === 'all' || fcat === currentCategory);
+        const matchesSearch = (!query || fname.includes(query) || ftype.includes(query));
+
+        if (matchesCategory && matchesSearch) {
+            row.style.display = '';
+            visible++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+
+    const fileCount = document.getElementById('fileCount');
+    if (fileCount) fileCount.textContent = visible;
+
+    const noMatches = document.getElementById('noFilterMatches');
+    const fileTable = document.getElementById('fileTable');
+    if (noMatches) {
+        if (visible === 0 && rows.length > 0) {
+            noMatches.style.display = 'flex';
+            if (fileTable) fileTable.style.display = 'none';
+        } else {
+            noMatches.style.display = 'none';
+            if (fileTable) fileTable.style.display = '';
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Local Storage Session Management
@@ -2324,25 +2412,6 @@ dropzone.addEventListener('drop', (e) => {
         }
     }
 });
-
-// File list search across filename and file type
-function filterFiles() {
-    const query = document.getElementById('fileSearch').value.toLowerCase().trim();
-    const rows = document.querySelectorAll('.file-row');
-    let visible = 0;
-    rows.forEach(row => {
-        const fname = row.getAttribute('data-filename') || '';
-        const ftype = row.getAttribute('data-type') || '';
-        if (!query || fname.includes(query) || ftype.includes(query)) {
-            row.style.display = '';
-            visible++;
-        } else {
-            row.style.display = 'none';
-        }
-    });
-    const fileCount = document.getElementById('fileCount');
-    if (fileCount) fileCount.textContent = visible;
-}
 
 // Page visibility and connection recovery
 document.addEventListener('visibilitychange', () => {
