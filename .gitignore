@@ -1,6 +1,5 @@
 uploads/
-*.exe
-*.iso
-*.mkv
-*.mp4
-*.zip
+cache/
+__pycache__/
+*.pyc
+.DS_Store
