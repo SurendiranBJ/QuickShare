@@ -40,6 +40,7 @@ DEBUG = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
 DEFAULT_CHUNK_SIZE = int(os.getenv("DEFAULT_CHUNK_SIZE", 5 * 1024 * 1024))  # 5 MB default
 UPLOAD_CACHE_TIMEOUT = int(os.getenv("UPLOAD_CACHE_TIMEOUT", 21600))        # 6 hours default
 CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", 1800))                 # 30 mins scan interval
+STREAM_BUFFER_SIZE = 1024 * 1024                                            # 1 MB streaming assembly buffer
 UUID_REGEX = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', re.IGNORECASE)
 
 # Ensure required directories exist
@@ -51,7 +52,7 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 
 # -----------------------------------------------------------------------------
-# Per-Upload Fine-Grained Locking Manager
+# In-Memory Fast State Cache & Per-Upload Lock Manager
 # -----------------------------------------------------------------------------
 class UploadLockManager:
     """
@@ -62,6 +63,7 @@ class UploadLockManager:
         self._guard = threading.Lock()
         self._locks = {}  # upload_id -> [Lock, ref_count]
         self._filename_collision_lock = threading.Lock()
+        self._memory_metadata = {}  # upload_id -> metadata dict
 
     @contextmanager
     def acquire(self, upload_id):
@@ -91,6 +93,18 @@ class UploadLockManager:
         """Global lock used only during final non-colliding filename determination."""
         with self._filename_collision_lock:
             yield
+
+    def get_cached_meta(self, upload_id):
+        with self._guard:
+            return self._memory_metadata.get(upload_id)
+
+    def set_cached_meta(self, upload_id, metadata):
+        with self._guard:
+            self._memory_metadata[upload_id] = metadata
+
+    def remove_cached_meta(self, upload_id):
+        with self._guard:
+            self._memory_metadata.pop(upload_id, None)
 
 upload_lock_manager = UploadLockManager()
 
@@ -370,7 +384,11 @@ def get_chunks_dir(upload_id):
     return os.path.join(cache_dir, "chunks")
 
 def load_metadata(upload_id):
-    """Safely load metadata.json for an upload session."""
+    """Safely load metadata.json for an upload session, utilizing in-memory cache when available."""
+    cached = upload_lock_manager.get_cached_meta(upload_id)
+    if cached is not None:
+        return cached
+
     meta_path = get_metadata_path(upload_id)
     if not meta_path or not os.path.exists(meta_path):
         return None
@@ -378,13 +396,18 @@ def load_metadata(upload_id):
         with open(meta_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             data["received_chunks"] = set(data.get("received_chunks", []))
+            upload_lock_manager.set_cached_meta(upload_id, data)
             return data
     except Exception as e:
         logger.error(f"Error reading metadata for upload_id={upload_id}: {e}")
         return None
 
-def save_metadata(upload_id, metadata):
-    """Atomically save metadata.json for an upload session."""
+def save_metadata(upload_id, metadata, write_disk=True):
+    """Save metadata to in-memory state and atomically write to disk without fsync bottlenecks."""
+    upload_lock_manager.set_cached_meta(upload_id, metadata)
+    if not write_disk:
+        return True
+
     meta_path = get_metadata_path(upload_id)
     if not meta_path:
         return False
@@ -397,7 +420,6 @@ def save_metadata(upload_id, metadata):
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(serializable, f, indent=2)
             f.flush()
-            os.fsync(f.fileno())
             
         os.replace(tmp_path, meta_path)
         return True
@@ -447,6 +469,7 @@ def clean_expired_cache():
 
                 if now - last_activity > UPLOAD_CACHE_TIMEOUT:
                     logger.info(f"UPLOAD EXPIRED: upload_id={entry} inactive for {int(now - last_activity)}s. Deleting cache.")
+                    upload_lock_manager.remove_cached_meta(entry)
                     try:
                         shutil.rmtree(item_path, ignore_errors=True)
                         count_cleaned += 1
@@ -1617,7 +1640,7 @@ UPLOAD_HTML = """
 // ---------------------------------------------------------------------------
 // Client Configuration
 // ---------------------------------------------------------------------------
-const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB chunks
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB optimal chunk size
 const UPLOAD_CONCURRENCY = 3;       // 3 concurrent chunk workers per file
 const MAX_CHUNK_RETRIES = 5;        // Max retry attempts per chunk with exponential backoff
 const STORAGE_KEY = "quickshare_active_uploads";
@@ -1824,7 +1847,7 @@ function resumeSessionFile(event, uploadId) {
 }
 
 // ---------------------------------------------------------------------------
-// Unified Chunked Uploader Implementation
+// Unified Chunked Uploader Implementation (High Throughput & Optimized UI)
 // ---------------------------------------------------------------------------
 class ChunkedUploader {
     constructor(file, existingUploadId = null) {
@@ -1850,6 +1873,7 @@ class ChunkedUploader {
         this.lastSpeedCheck = Date.now();
         this.bytesSinceLastCheck = 0;
         this.currentSpeed = 0;
+        this.uiUpdatePending = false;
         
         // Abort controllers for active chunk requests
         this.abortControllers = new Map();
@@ -1890,6 +1914,15 @@ class ChunkedUploader {
         `;
     }
 
+    requestUIUpdate() {
+        if (this.uiUpdatePending) return;
+        this.uiUpdatePending = true;
+        requestAnimationFrame(() => {
+            this.uiUpdatePending = false;
+            this.updateUI();
+        });
+    }
+
     updateUI() {
         const card = document.getElementById(this.elementId);
         if (!card) return;
@@ -1907,14 +1940,18 @@ class ChunkedUploader {
             chunksText.textContent = `${this.receivedChunks.size}/${this.totalChunks} chunks`;
         }
 
-        // Calculate progress percentage based strictly on confirmed chunks
+        // Fast O(1) progress calculation
         let percent = 0;
         if (this.totalSize > 0) {
             let confirmedBytes = 0;
-            for (let idx of this.receivedChunks) {
-                const start = idx * this.chunkSize;
-                const end = Math.min(start + this.chunkSize, this.totalSize);
-                confirmedBytes += (end - start);
+            if (this.receivedChunks.size === this.totalChunks) {
+                confirmedBytes = this.totalSize;
+            } else {
+                for (let idx of this.receivedChunks) {
+                    const start = idx * this.chunkSize;
+                    const end = Math.min(start + this.chunkSize, this.totalSize);
+                    confirmedBytes += (end - start);
+                }
             }
             this.uploadedBytes = confirmedBytes;
             percent = Math.min(99, Math.round((confirmedBytes / this.totalSize) * 100));
@@ -2216,7 +2253,7 @@ class ChunkedUploader {
             let workerCount = Math.min(UPLOAD_CONCURRENCY, queue.length || 1);
             const workers = [];
 
-            // Smoothed speed calculation timer
+            // Smoothed speed calculation timer (every 400ms)
             const speedInterval = setInterval(() => {
                 if (this.status !== 'uploading' || this.uploadGeneration !== currentGen) {
                     clearInterval(speedInterval);
@@ -2224,14 +2261,14 @@ class ChunkedUploader {
                 }
                 const now = Date.now();
                 const elapsed = (now - this.lastSpeedCheck) / 1000;
-                if (elapsed > 0.5) {
+                if (elapsed > 0.4) {
                     const instantSpeed = this.bytesSinceLastCheck / elapsed;
                     this.currentSpeed = this.currentSpeed === 0 ? Math.round(instantSpeed) : Math.round(0.7 * instantSpeed + 0.3 * this.currentSpeed);
                     this.bytesSinceLastCheck = 0;
                     this.lastSpeedCheck = now;
-                    this.updateUI();
+                    this.requestUIUpdate();
                 }
-            }, 600);
+            }, 400);
 
             for (let w = 0; w < workerCount; w++) {
                 workers.push((async () => {
@@ -2245,12 +2282,12 @@ class ChunkedUploader {
                                 await this.uploadSingleChunk(chunkIndex, currentGen);
                                 success = true;
                                 this.receivedChunks.add(chunkIndex);
-                                this.updateUI();
+                                this.requestUIUpdate();
                             } catch (err) {
                                 if (this.status !== 'uploading' || this.uploadGeneration !== currentGen) break;
                                 retries++;
                                 console.warn(`Retry ${retries}/${MAX_CHUNK_RETRIES} for chunk ${chunkIndex}:`, err);
-                                await new Promise(r => setTimeout(r, Math.min(800 * Math.pow(1.5, retries), 6000)));
+                                await new Promise(r => setTimeout(r, Math.min(600 * Math.pow(1.5, retries), 5000)));
                             }
                         }
 
@@ -2538,7 +2575,7 @@ def upload_start():
         "total_size": total_size,
         "chunk_size": chunk_size,
         "total_chunks": total_chunks,
-        "received_chunks": [],
+        "received_chunks": set(),
         "file_hash": file_hash,
         "created_at": time.time(),
         "updated_at": time.time(),
@@ -2546,7 +2583,7 @@ def upload_start():
     }
 
     with upload_lock_manager.acquire(upload_id):
-        if not save_metadata(upload_id, metadata):
+        if not save_metadata(upload_id, metadata, write_disk=True):
             shutil.rmtree(cache_dir, ignore_errors=True)
             return jsonify({"success": False, "error": "Failed to initialize upload metadata"}), 500
 
@@ -2562,7 +2599,7 @@ def upload_start():
 
 @app.route('/upload/chunk', methods=['POST'])
 def upload_chunk():
-    """Receives and securely stores a single chunk for an upload session."""
+    """Receives and securely stores a single chunk for an upload session with lock-free disk I/O."""
     upload_id = request.form.get("upload_id")
     chunk_index_raw = request.form.get("chunk_index")
     total_chunks_raw = request.form.get("total_chunks")
@@ -2575,73 +2612,73 @@ def upload_chunk():
     if not cache_dir or not os.path.exists(cache_dir):
         return jsonify({"success": False, "error": "Upload session not found or expired"}), 404
 
-    with upload_lock_manager.acquire(upload_id):
-        metadata = load_metadata(upload_id)
-        if not metadata:
-            return jsonify({"success": False, "error": "Upload session metadata not found"}), 404
+    metadata = load_metadata(upload_id)
+    if not metadata:
+        return jsonify({"success": False, "error": "Upload session metadata not found"}), 404
 
-        current_status = metadata.get("status")
-        # Strict state validation: if already assembling, reject with 409 Conflict
-        if current_status == "assembling":
-            return jsonify({"success": False, "error": "Upload assembly is already in progress"}), 409
+    current_status = metadata.get("status")
+    # Strict state validation: if already assembling, reject with 409 Conflict
+    if current_status == "assembling":
+        return jsonify({"success": False, "error": "Upload assembly is already in progress"}), 409
 
-        if current_status in ["cancelled", "completed", "failed"]:
-            return jsonify({"success": False, "error": f"Upload session is {current_status}"}), 400
+    if current_status in ["cancelled", "completed", "failed"]:
+        return jsonify({"success": False, "error": f"Upload session is {current_status}"}), 400
 
-        try:
-            chunk_index = int(chunk_index_raw)
-            total_chunks = int(total_chunks_raw)
-        except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "Invalid chunk_index or total_chunks"}), 400
+    try:
+        chunk_index = int(chunk_index_raw)
+        total_chunks = int(total_chunks_raw)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "Invalid chunk_index or total_chunks"}), 400
 
-        if total_chunks != metadata["total_chunks"]:
-            return jsonify({"success": False, "error": "total_chunks mismatch with upload session"}), 400
+    if total_chunks != metadata["total_chunks"]:
+        return jsonify({"success": False, "error": "total_chunks mismatch with upload session"}), 400
 
-        if chunk_index < 0 or chunk_index >= metadata["total_chunks"]:
-            return jsonify({"success": False, "error": f"chunk_index out of bounds (0..{metadata['total_chunks'] - 1})"}), 400
+    if chunk_index < 0 or chunk_index >= metadata["total_chunks"]:
+        return jsonify({"success": False, "error": f"chunk_index out of bounds (0..{metadata['total_chunks'] - 1})"}), 400
 
-        if not chunk_file:
-            return jsonify({"success": False, "error": "Missing chunk file payload"}), 400
+    if not chunk_file:
+        return jsonify({"success": False, "error": "Missing chunk file payload"}), 400
 
-        # Authoritative server-side expected chunk size calculation
-        expected_start = chunk_index * metadata["chunk_size"]
-        expected_end = min(expected_start + metadata["chunk_size"], metadata["total_size"])
-        expected_chunk_size = max(0, expected_end - expected_start)
+    # Authoritative server-side expected chunk size calculation
+    expected_start = chunk_index * metadata["chunk_size"]
+    expected_end = min(expected_start + metadata["chunk_size"], metadata["total_size"])
+    expected_chunk_size = max(0, expected_end - expected_start)
 
-        chunks_dir = get_chunks_dir(upload_id)
-        os.makedirs(chunks_dir, exist_ok=True)
-        chunk_filename = f"{chunk_index:06d}"
-        chunk_path = os.path.join(chunks_dir, chunk_filename)
-        temp_chunk_path = f"{chunk_path}.tmp_{uuid.uuid4().hex[:6]}"
+    chunks_dir = get_chunks_dir(upload_id)
+    os.makedirs(chunks_dir, exist_ok=True)
+    chunk_filename = f"{chunk_index:06d}"
+    chunk_path = os.path.join(chunks_dir, chunk_filename)
+    temp_chunk_path = f"{chunk_path}.tmp_{uuid.uuid4().hex[:6]}"
 
-        try:
-            chunk_file.save(temp_chunk_path)
-            actual_chunk_size = os.path.getsize(temp_chunk_path)
+    # Lock-free binary disk write to temporary chunk path
+    try:
+        chunk_file.save(temp_chunk_path)
+        actual_chunk_size = os.path.getsize(temp_chunk_path)
 
-            if actual_chunk_size != expected_chunk_size:
-                os.remove(temp_chunk_path)
-                return jsonify({
-                    "success": False,
-                    "error": f"Chunk size mismatch: expected {expected_chunk_size} B, got {actual_chunk_size} B"
-                }), 400
+        if actual_chunk_size != expected_chunk_size:
+            os.remove(temp_chunk_path)
+            return jsonify({
+                "success": False,
+                "error": f"Chunk size mismatch: expected {expected_chunk_size} B, got {actual_chunk_size} B"
+            }), 400
 
-            # Atomic replace for chunk file (idempotent overwrite if retried)
-            os.replace(temp_chunk_path, chunk_path)
+        # Atomic replace for chunk file (idempotent overwrite if retried)
+        os.replace(temp_chunk_path, chunk_path)
 
-            # Update metadata
+        # Micro-second lock to update received set in memory
+        with upload_lock_manager.acquire(upload_id):
             metadata["received_chunks"].add(chunk_index)
             metadata["updated_at"] = time.time()
-            if not save_metadata(upload_id, metadata):
-                return jsonify({"success": False, "error": "Failed to persist upload metadata"}), 500
+            save_metadata(upload_id, metadata, write_disk=False)
 
-        except Exception as e:
-            if os.path.exists(temp_chunk_path):
-                try:
-                    os.remove(temp_chunk_path)
-                except OSError:
-                    pass
-            logger.error(f"Error saving chunk {chunk_index} for upload_id={upload_id}: {e}")
-            return jsonify({"success": False, "error": "Internal error storing chunk"}), 500
+    except Exception as e:
+        if os.path.exists(temp_chunk_path):
+            try:
+                os.remove(temp_chunk_path)
+            except OSError:
+                pass
+        logger.error(f"Error saving chunk {chunk_index} for upload_id={upload_id}: {e}")
+        return jsonify({"success": False, "error": "Internal error storing chunk"}), 500
 
     logger.info(f"CHUNK RECEIVED: upload_id={upload_id}, chunk={chunk_index}/{metadata['total_chunks']-1}, received_total={len(metadata['received_chunks'])}")
     return jsonify({
@@ -2679,7 +2716,7 @@ def upload_status(upload_id):
 
         metadata["received_chunks"] = actual_chunks
         metadata["updated_at"] = time.time()
-        save_metadata(upload_id, metadata)
+        save_metadata(upload_id, metadata, write_disk=True)
 
         received_list = sorted(list(actual_chunks))
         missing_chunks = [i for i in range(total_chunks) if i not in actual_chunks]
@@ -2703,7 +2740,7 @@ def upload_status(upload_id):
 
 @app.route('/upload/complete', methods=['POST'])
 def upload_complete():
-    """Three-phase non-blocking assembly: validates state, streams chunks, and atomically finalizes."""
+    """Three-phase non-blocking assembly: validates state, streams chunks with 1MB buffer, and atomically finalizes."""
     data = request.get_json(silent=True) or {}
     upload_id = data.get("upload_id")
 
@@ -2753,7 +2790,7 @@ def upload_complete():
         # Transition status to assembling
         metadata["status"] = "assembling"
         metadata["updated_at"] = time.time()
-        save_metadata(upload_id, metadata)
+        save_metadata(upload_id, metadata, write_disk=True)
         logger.info(f"ASSEMBLY START: upload_id={upload_id}, total_chunks={total_chunks}, expected_size={expected_size}")
 
     # -------------------------------------------------------------------------
@@ -2770,7 +2807,7 @@ def upload_complete():
                 chunk_path = os.path.join(chunks_dir, f"{i:06d}")
                 with open(chunk_path, "rb") as infile:
                     while True:
-                        buffer = infile.read(64 * 1024)  # 64 KB streaming buffer
+                        buffer = infile.read(STREAM_BUFFER_SIZE)
                         if not buffer:
                             break
                         outfile.write(buffer)
@@ -2803,6 +2840,7 @@ def upload_complete():
                     os.remove(assembled_tmp)
                 except OSError:
                     pass
+            upload_lock_manager.remove_cached_meta(upload_id)
             shutil.rmtree(cache_dir, ignore_errors=True)
             logger.info(f"CANCEL WON RACE: upload_id={upload_id} cancelled during assembly. Purged.")
             return jsonify({"success": False, "error": "Upload was cancelled during assembly"}), 400
@@ -2815,7 +2853,7 @@ def upload_complete():
                     pass
             latest_meta["status"] = "failed"
             latest_meta["updated_at"] = time.time()
-            save_metadata(upload_id, latest_meta)
+            save_metadata(upload_id, latest_meta, write_disk=True)
             return jsonify({"success": False, "error": assembly_error}), 400
 
         # Atomic collision-safe final filename generation
@@ -2828,9 +2866,7 @@ def upload_complete():
         latest_meta["safe_filename"] = final_filename
         latest_meta["updated_at"] = time.time()
         
-        if not save_metadata(upload_id, latest_meta):
-            logger.warning(f"Final metadata persistence failed for upload_id={upload_id}, but file was safely finalized to '{final_filename}'")
-
+        upload_lock_manager.remove_cached_meta(upload_id)
         shutil.rmtree(cache_dir, ignore_errors=True)
 
     calculated_hash = hasher.hexdigest()
@@ -2856,13 +2892,14 @@ def upload_cancel(upload_id):
         return jsonify({"success": False, "error": "Invalid upload path"}), 400
 
     with upload_lock_manager.acquire(upload_id):
+        upload_lock_manager.remove_cached_meta(upload_id)
         if os.path.exists(cache_dir):
             try:
                 meta = load_metadata(upload_id)
                 if meta:
                     meta["status"] = "cancelled"
                     meta["updated_at"] = time.time()
-                    save_metadata(upload_id, meta)
+                    save_metadata(upload_id, meta, write_disk=False)
 
                 shutil.rmtree(cache_dir, ignore_errors=True)
                 logger.info(f"UPLOAD CANCELLED: upload_id={upload_id}. Entire cache deleted.")
@@ -2895,4 +2932,4 @@ def download_file(filename):
 if __name__ == '__main__':
     lan_ip = get_lan_ip()
     logger.info(f"Starting QuickShare LAN File Transfer Server on http://{lan_ip}:{PORT} (Listening on {HOST}:{PORT}, debug={DEBUG})")
-    app.run(host=HOST, port=PORT, debug=DEBUG)
+    app.run(host=HOST, port=PORT, debug=DEBUG, threaded=True)
