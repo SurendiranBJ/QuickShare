@@ -102,7 +102,7 @@ def get_lan_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.5)
-        # Connect to a public DNS IP (no packet is actually transmitted over the wire)
+        # Connect to a public DNS IP (no packet is transmitted over the wire)
         s.connect(('8.8.8.8', 80))
         ip = s.getsockname()[0]
         s.close()
@@ -118,7 +118,7 @@ def get_lan_ip():
             return '127.0.0.1'
 
 def generate_qr_svg(url):
-    """Generates an SVG QR code string without requiring heavy imaging dependencies."""
+    """Generates a clean SVG QR code string."""
     try:
         import qrcode
         import qrcode.image.svg
@@ -126,7 +126,7 @@ def generate_qr_svg(url):
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_L,
             box_size=10,
-            border=2,
+            border=1,
             image_factory=qrcode.image.svg.SvgPathImage
         )
         qr.add_data(url)
@@ -140,7 +140,7 @@ def generate_qr_svg(url):
         return None
 
 def format_bytes(size_bytes):
-    """Format bytes into a human readable string (KB, MB, GB, etc.)."""
+    """Format bytes into a clean human readable string."""
     if size_bytes is None or size_bytes < 0:
         return "0 B"
     if size_bytes == 0:
@@ -325,7 +325,7 @@ if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
     cleanup_thread.start()
 
 # -----------------------------------------------------------------------------
-# Frontend HTML / UI Template (Mobile-First, Responsive & Accessible)
+# Frontend HTML / UI Template (Premium Commercial Quality — Zero Emojis)
 # -----------------------------------------------------------------------------
 UPLOAD_HTML = """
 <!DOCTYPE html>
@@ -333,366 +333,430 @@ UPLOAD_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-    <title>QuickShare — Fast & Resumable LAN File Transfers</title>
+    <title>QuickShare — Local Network File Transfer</title>
     <style>
         :root {
-            --bg-color: #0b0f19;
-            --surface-card: #151e2e;
-            --surface-hover: #222f46;
-            --card-border: #26354d;
-            --primary: #38bdf8;
-            --primary-hover: #0ea5e9;
-            --primary-gradient: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
-            --primary-light: rgba(56, 189, 248, 0.12);
-            --success: #10b981;
-            --success-light: rgba(16, 185, 129, 0.12);
-            --danger: #ef4444;
-            --danger-hover: #dc2626;
-            --danger-light: rgba(239, 68, 68, 0.15);
-            --warning: #f59e0b;
-            --warning-light: rgba(245, 158, 11, 0.15);
-            --text-primary: #f8fafc;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-            --border-radius: 14px;
-            --transition: all 0.2s ease-in-out;
+            --bg-canvas: #090a0f;
+            --bg-surface: #111318;
+            --bg-surface-elevated: #171922;
+            --bg-surface-hover: #1c202a;
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-strong: rgba(255, 255, 255, 0.16);
+            --text-primary: #f0f2f7;
+            --text-secondary: #8c93a4;
+            --text-tertiary: #545b6d;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --accent-subtle: rgba(59, 130, 246, 0.12);
+            --accent-text: #60a5fa;
+            --status-success: #10b981;
+            --status-warning: #f59e0b;
+            --status-danger: #ef4444;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --font-stack: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            --transition-smooth: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+            font-family: var(--font-stack);
             -webkit-tap-highlight-color: transparent;
         }
 
         body {
-            background-color: var(--bg-color);
+            background-color: var(--bg-canvas);
             color: var(--text-primary);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: clamp(1rem, 3vw, 2.5rem) 1rem;
             overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
-        .container {
-            width: min(100% - 1rem, 880px);
-            margin-inline: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 1.5rem;
+        /* Top Application Navigation */
+        .app-nav {
+            width: 100%;
+            border-bottom: 1px solid var(--border-subtle);
+            background-color: rgba(9, 10, 15, 0.85);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 50;
         }
 
-        /* Header */
-        header {
-            text-align: center;
-            margin-bottom: 0.25rem;
-        }
-
-        header h1 {
-            font-size: clamp(1.85rem, 5vw, 2.6rem);
-            font-weight: 800;
-            letter-spacing: -0.03em;
-            background: var(--primary-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 0.35rem;
-        }
-
-        header p {
-            color: var(--text-secondary);
-            font-size: clamp(0.9rem, 2.5vw, 1.05rem);
-        }
-
-        /* Cards */
-        .card {
-            background-color: var(--surface-card);
-            border: 1px solid var(--card-border);
-            border-radius: var(--border-radius);
-            padding: clamp(1.15rem, 3vw, 1.75rem);
-            box-shadow: 0 12px 30px -8px rgba(0, 0, 0, 0.45);
-        }
-
-        .card-title {
-            font-size: clamp(1.05rem, 2.8vw, 1.25rem);
-            font-weight: 700;
-            margin-bottom: 1.15rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            color: var(--text-primary);
-        }
-
-        /* LAN Status Card */
-        .lan-card {
-            background: linear-gradient(135deg, rgba(21, 30, 46, 0.9) 0%, rgba(30, 41, 59, 0.6) 100%);
-            border: 1px solid rgba(56, 189, 248, 0.25);
+        .nav-inner {
+            max-width: 820px;
+            margin: 0 auto;
+            padding: 0.85rem 1.25rem;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 1rem;
-            flex-wrap: wrap;
         }
 
-        .lan-info {
+        .brand-group {
             display: flex;
             align-items: center;
-            gap: 0.85rem;
-            flex: 1 1 280px;
+            gap: 0.65rem;
+            text-decoration: none;
+            color: var(--text-primary);
         }
 
-        .lan-indicator {
-            width: 12px;
-            height: 12px;
-            background-color: var(--success);
-            border-radius: 50%;
-            box-shadow: 0 0 10px var(--success);
+        .brand-icon {
+            width: 22px;
+            height: 22px;
+            color: var(--accent);
             flex-shrink: 0;
         }
 
-        .lan-details {
-            display: flex;
-            flex-direction: column;
-            gap: 0.2rem;
-        }
-
-        .lan-title {
-            font-size: 0.85rem;
+        .brand-title {
+            font-size: 0.98rem;
             font-weight: 700;
-            color: var(--success);
+            letter-spacing: -0.02em;
+        }
+
+        .brand-badge {
+            font-size: 0.68rem;
+            font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.06em;
+            background: var(--bg-surface-elevated);
+            color: var(--text-tertiary);
+            padding: 0.15rem 0.45rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
         }
 
-        .lan-url {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            font-size: clamp(0.95rem, 2.8vw, 1.1rem);
-            font-weight: 600;
-            color: var(--text-primary);
-            word-break: break-all;
-        }
-
-        .lan-actions {
+        .nav-actions {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            flex-wrap: wrap;
+            gap: 0.65rem;
         }
 
-        /* Dropzone */
-        .dropzone {
-            border: 2px dashed var(--card-border);
-            border-radius: var(--border-radius);
-            padding: clamp(1.75rem, 4vw, 2.75rem) 1.25rem;
-            text-align: center;
-            cursor: pointer;
-            transition: var(--transition);
-            background: rgba(11, 15, 25, 0.5);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.6rem;
-        }
-
-        .dropzone:hover, .dropzone.dragover, .dropzone:focus-visible {
-            border-color: var(--primary);
-            background: var(--primary-light);
-            outline: none;
-        }
-
-        .dropzone-icon {
-            font-size: clamp(2.2rem, 6vw, 3rem);
-            color: var(--primary);
-            line-height: 1;
-        }
-
-        .dropzone-text {
-            font-size: clamp(1rem, 2.8vw, 1.15rem);
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .dropzone-subtext {
-            font-size: clamp(0.8rem, 2.2vw, 0.9rem);
-            color: var(--text-secondary);
-        }
-
-        .desktop-only-text { display: inline; }
-        .mobile-only-text { display: none; }
-
-        @media (max-width: 640px) {
-            .desktop-only-text { display: none; }
-            .mobile-only-text { display: inline; }
-        }
-
-        .file-input {
-            display: none;
-        }
-
-        /* Buttons */
-        .btn {
-            background-color: var(--primary);
-            color: #0b0f19;
-            border: none;
-            border-radius: 8px;
-            padding: 0.65rem 1.25rem;
-            font-size: 0.95rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: var(--transition);
+        .lan-pill-btn {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 0.38rem 0.75rem;
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-            text-decoration: none;
-            min-height: 40px;
+            gap: 0.55rem;
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition-smooth);
         }
 
-        .btn:hover, .btn:focus-visible {
-            background-color: var(--primary-hover);
+        .lan-pill-btn:hover, .lan-pill-btn:focus-visible {
+            background: var(--bg-surface-hover);
+            border-color: var(--border-strong);
+            color: var(--text-primary);
             outline: none;
         }
 
-        .btn-danger {
-            background-color: var(--danger);
-            color: #ffffff;
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: var(--status-success);
+            box-shadow: 0 0 6px var(--status-success);
+            flex-shrink: 0;
         }
 
-        .btn-danger:hover, .btn-danger:focus-visible {
-            background-color: var(--danger-hover);
-        }
-
-        .btn-secondary {
-            background-color: var(--surface-hover);
+        .lan-ip-text {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
             color: var(--text-primary);
-            border: 1px solid var(--card-border);
         }
 
-        .btn-secondary:hover, .btn-secondary:focus-visible {
-            background-color: #33435e;
-        }
-
-        .btn-sm {
-            padding: 0.45rem 0.85rem;
-            font-size: 0.85rem;
-            min-height: 36px;
-            border-radius: 6px;
-        }
-
-        /* Upload Queue / Cards */
-        .upload-queue {
+        /* Main Workspace Container */
+        .workspace {
+            width: 100%;
+            max-width: 820px;
+            padding: 2.25rem 1.25rem 4rem;
             display: flex;
             flex-direction: column;
-            gap: 1rem;
-            margin-top: 1.25rem;
+            gap: 2.5rem;
         }
 
-        .upload-item {
-            background: rgba(11, 15, 25, 0.65);
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            padding: clamp(1rem, 2.5vw, 1.35rem);
+        /* Section Titles */
+        .section-header {
             display: flex;
-            flex-direction: column;
-            gap: 0.85rem;
-            transition: var(--transition);
-        }
-
-        .upload-header {
-            display: flex;
+            align-items: center;
             justify-content: space-between;
-            align-items: flex-start;
-            gap: 0.75rem;
-            flex-wrap: wrap;
+            margin-bottom: 0.85rem;
         }
 
-        .upload-info {
+        .section-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-tertiary);
+        }
+
+        /* Dropzone Component */
+        .dropzone-container {
+            border: 1px dashed var(--border-strong);
+            border-radius: var(--radius-lg);
+            background: var(--bg-surface);
+            padding: 3rem 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.15rem;
+        }
+
+        .dropzone-container:hover, .dropzone-container.dragover, .dropzone-container:focus-visible {
+            border-color: var(--accent);
+            background: var(--accent-subtle);
+            outline: none;
+        }
+
+        .dropzone-icon-box {
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-md);
+            background: var(--bg-surface-elevated);
+            border: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            transition: var(--transition-smooth);
+        }
+
+        .dropzone-container:hover .dropzone-icon-box, .dropzone-container.dragover .dropzone-icon-box {
+            color: var(--accent-text);
+            border-color: rgba(59, 130, 246, 0.35);
+        }
+
+        .dropzone-text-group {
             display: flex;
             flex-direction: column;
             gap: 0.25rem;
-            flex: 1 1 240px;
-            min-width: 0;
         }
 
-        .upload-filename {
+        .dropzone-title {
+            font-size: 1.05rem;
             font-weight: 600;
-            font-size: clamp(0.95rem, 2.6vw, 1.05rem);
-            word-break: break-word;
-            line-height: 1.3;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
         }
 
-        .upload-meta {
-            font-size: 0.82rem;
+        .dropzone-subtitle {
+            font-size: 0.85rem;
             color: var(--text-secondary);
         }
 
-        .upload-actions {
+        .desktop-text { display: inline; }
+        .mobile-text { display: none; }
+
+        @media (max-width: 640px) {
+            .desktop-text { display: none; }
+            .mobile-text { display: inline; }
+            .dropzone-container { padding: 2.25rem 1.25rem; }
+        }
+
+        .file-input { display: none; }
+
+        /* Buttons */
+        .btn {
+            background: var(--bg-surface-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem 0.95rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.45rem;
+            text-decoration: none;
+            min-height: 36px;
+        }
+
+        .btn:hover, .btn:focus-visible {
+            background: var(--bg-surface-hover);
+            border-color: var(--border-strong);
+            outline: none;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #ffffff;
+            border-color: var(--accent);
+            font-weight: 600;
+        }
+
+        .btn-primary:hover, .btn-primary:focus-visible {
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: #f87171;
+            border-color: rgba(239, 68, 68, 0.25);
+        }
+
+        .btn-danger:hover, .btn-danger:focus-visible {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.4);
+        }
+
+        .btn-sm {
+            padding: 0.35rem 0.7rem;
+            font-size: 0.8rem;
+            min-height: 32px;
+        }
+
+        .btn-icon-only {
+            padding: 0.4rem;
+            width: 32px;
+            height: 32px;
+            min-height: 32px;
+        }
+
+        /* SVG Icon helper */
+        .svg-icon {
+            width: 15px;
+            height: 15px;
+            stroke-width: 2;
+            stroke: currentColor;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            flex-shrink: 0;
+        }
+
+        /* Transfer Queue */
+        .transfer-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .transfer-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 1.15rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.85rem;
+            transition: var(--transition-smooth);
+        }
+
+        .transfer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        .transfer-title-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .transfer-filename {
+            font-size: 0.92rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            word-break: break-all;
+            line-height: 1.3;
+        }
+
+        .transfer-meta {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+
+        .transfer-actions {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-            margin-left: auto;
+            gap: 0.45rem;
+            flex-shrink: 0;
         }
 
         /* Semantic Badges */
-        .badge {
-            font-size: 0.75rem;
-            font-weight: 700;
-            padding: 0.3rem 0.6rem;
-            border-radius: 6px;
+        .status-badge {
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 0.2rem 0.5rem;
+            border-radius: var(--radius-sm);
+            letter-spacing: 0.04em;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
             display: inline-flex;
             align-items: center;
             gap: 0.35rem;
+            font-family: var(--font-mono);
         }
 
-        .badge-uploading { background: var(--primary-light); color: var(--primary); }
-        .badge-assembling { background: var(--warning-light); color: var(--warning); }
-        .badge-completed { background: var(--success-light); color: var(--success); }
-        .badge-cancelled { background: var(--danger-light); color: var(--danger); }
-        .badge-error { background: var(--danger-light); color: var(--danger); }
-        .badge-paused { background: rgba(148, 163, 184, 0.15); color: var(--text-secondary); }
+        .badge-uploading { background: var(--accent-subtle); color: var(--accent-text); }
+        .badge-assembling { background: rgba(245, 158, 11, 0.12); color: #fbbf24; }
+        .badge-completed { background: rgba(16, 185, 129, 0.12); color: #34d399; }
+        .badge-cancelled { background: rgba(239, 68, 68, 0.12); color: #f87171; }
+        .badge-error { background: rgba(239, 68, 68, 0.12); color: #f87171; }
+        .badge-paused { background: rgba(140, 147, 164, 0.12); color: var(--text-secondary); }
 
         /* Progress Bar */
-        .progress-bar-container {
+        .progress-track {
             width: 100%;
-            height: 9px;
-            background-color: rgba(38, 53, 77, 0.6);
-            border-radius: 9999px;
+            height: 4px;
+            background-color: var(--bg-surface-elevated);
+            border-radius: 999px;
             overflow: hidden;
         }
 
-        .progress-bar-fill {
+        .progress-fill {
             height: 100%;
-            background: var(--primary-gradient);
-            border-radius: 9999px;
+            background-color: var(--accent);
+            border-radius: 999px;
             width: 0%;
             transition: width 0.2s ease-out;
         }
 
-        .progress-bar-fill.completed {
-            background: #10b981;
+        .progress-fill.completed {
+            background-color: var(--status-success);
         }
 
-        .upload-stats {
+        .transfer-footer {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 0.82rem;
+            font-size: 0.78rem;
             color: var(--text-secondary);
+            font-family: var(--font-mono);
             flex-wrap: wrap;
             gap: 0.4rem;
         }
 
-        /* Resumable Session Alert */
-        .resume-alert {
-            background: rgba(56, 189, 248, 0.08);
-            border: 1px solid rgba(56, 189, 248, 0.35);
-            border-radius: 10px;
-            padding: 1rem 1.15rem;
+        /* Interrupted Session Notification */
+        .session-resume-alert {
+            background: var(--bg-surface);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: var(--radius-md);
+            padding: 0.95rem 1.15rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -701,320 +765,444 @@ UPLOAD_HTML = """
             flex-wrap: wrap;
         }
 
-        .resume-alert-text {
-            font-size: 0.9rem;
+        .session-resume-text {
+            font-size: 0.85rem;
             color: var(--text-primary);
-            flex: 1 1 260px;
             line-height: 1.4;
+            flex: 1 1 280px;
         }
 
-        .resume-alert-actions {
+        .session-resume-actions {
             display: flex;
             gap: 0.5rem;
             flex-wrap: wrap;
         }
 
-        /* QR Code Modal */
-        .qr-modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.75);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            padding: 1rem;
+        /* Available Files Table */
+        .files-container {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            overflow: hidden;
         }
 
-        .qr-modal-card {
-            background: var(--surface-card);
-            border: 1px solid var(--card-border);
-            border-radius: var(--border-radius);
-            padding: 1.75rem;
-            max-width: 380px;
-            width: 100%;
-            text-align: center;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 1.25rem;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
-        }
-
-        .qr-image-container {
-            background: #ffffff;
-            padding: 1rem;
-            border-radius: 12px;
+        .files-toolbar {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-subtle);
             display: flex;
             align-items: center;
-            justify-content: center;
-            max-width: 240px;
-            width: 100%;
-            aspect-ratio: 1;
-        }
-
-        .qr-image-container svg {
-            width: 100%;
-            height: 100%;
-        }
-
-        /* File List & Responsive Table-to-Card */
-        .file-list-header {
-            display: flex;
             justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1.25rem;
             gap: 0.75rem;
-            flex-wrap: wrap;
+        }
+
+        .search-box {
+            position: relative;
+            display: flex;
+            align-items: center;
+            width: 100%;
+            max-width: 260px;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 0.65rem;
+            color: var(--text-tertiary);
+            pointer-events: none;
+            width: 14px;
+            height: 14px;
         }
 
         .search-input {
-            background-color: rgba(11, 15, 25, 0.6);
-            border: 1px solid var(--card-border);
-            border-radius: 8px;
-            padding: 0.55rem 0.85rem;
+            width: 100%;
+            background: var(--bg-surface-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 0.4rem 0.65rem 0.4rem 2rem;
             color: var(--text-primary);
-            font-size: 0.88rem;
+            font-size: 0.82rem;
             outline: none;
-            width: min(100%, 240px);
-            transition: var(--transition);
+            transition: var(--transition-smooth);
         }
 
         .search-input:focus {
-            border-color: var(--primary);
-            width: min(100%, 280px);
+            border-color: var(--accent);
+            background: var(--bg-surface-hover);
         }
 
         .file-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
 
         .file-table th {
             text-align: left;
-            padding: 0.75rem 1rem;
-            color: var(--text-muted);
-            border-bottom: 1px solid var(--card-border);
-            font-size: 0.8rem;
+            padding: 0.65rem 1rem;
+            color: var(--text-tertiary);
+            font-size: 0.72rem;
+            font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border-subtle);
+            background: var(--bg-surface-elevated);
         }
 
         .file-table td {
-            padding: 0.9rem 1rem;
-            border-bottom: 1px solid rgba(38, 53, 77, 0.5);
+            padding: 0.8rem 1rem;
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-primary);
             vertical-align: middle;
         }
 
+        .file-table tr:last-child td {
+            border-bottom: none;
+        }
+
         .file-table tr:hover td {
-            background-color: rgba(34, 47, 70, 0.3);
+            background-color: var(--bg-surface-hover);
         }
 
         .file-name-cell {
-            font-weight: 500;
             display: flex;
             align-items: center;
             gap: 0.6rem;
-            word-break: break-word;
+            font-weight: 500;
+            word-break: break-all;
+        }
+
+        .file-icon {
+            color: var(--text-tertiary);
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+        }
+
+        .file-size-cell {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .file-date-cell {
+            font-size: 0.8rem;
+            color: var(--text-tertiary);
         }
 
         .empty-state {
+            padding: 3.5rem 1.5rem;
             text-align: center;
-            padding: 2.5rem 1rem;
-            color: var(--text-muted);
-            font-size: 0.95rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.4rem;
         }
 
-        /* Mobile Layout Overrides */
+        .empty-state-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-subtitle {
+            font-size: 0.8rem;
+            color: var(--text-tertiary);
+        }
+
+        /* Modal Dialog */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            padding: 1rem;
+        }
+
+        .modal-dialog {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            max-width: 360px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.15rem;
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.7);
+        }
+
+        .modal-header {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .qr-card {
+            background: #ffffff;
+            padding: 0.85rem;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 200px;
+            height: 200px;
+        }
+
+        .qr-card svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .modal-url-box {
+            width: 100%;
+            background: var(--bg-surface-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 0.45rem 0.65rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+        }
+
+        .modal-url-text {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--accent-text);
+            word-break: break-all;
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            z-index: 90;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: var(--bg-surface-elevated);
+            border: 1px solid var(--border-strong);
+            color: var(--text-primary);
+            padding: 0.65rem 1rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.82rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            animation: toastIn 0.2s ease-out;
+        }
+
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Mobile Layout */
         @media (max-width: 640px) {
-            .btn {
-                min-height: 44px;
-                padding: 0.65rem 1rem;
-            }
-
-            .btn-sm {
-                min-height: 42px;
-                padding: 0.55rem 1rem;
-                font-size: 0.9rem;
-            }
-
-            .lan-actions {
-                width: 100%;
-            }
-
-            .lan-actions .btn {
-                flex: 1 1 120px;
-            }
-
-            .upload-actions {
-                width: 100%;
-                justify-content: flex-start;
-                margin-top: 0.35rem;
-            }
-
-            .upload-actions .btn {
-                flex: 1 1 100px;
-            }
+            .workspace { padding: 1.5rem 1rem 3rem; gap: 2rem; }
+            .btn { min-height: 42px; }
+            .btn-sm { min-height: 38px; }
+            
+            .search-box { max-width: 100%; }
 
             .file-table, .file-table thead, .file-table tbody, .file-table th, .file-table td, .file-table tr {
                 display: block;
             }
 
-            .file-table thead {
-                display: none;
-            }
+            .file-table thead { display: none; }
 
             .file-table tr {
-                background: rgba(11, 15, 25, 0.45);
-                border: 1px solid var(--card-border);
-                border-radius: 10px;
-                margin-bottom: 0.85rem;
-                padding: 1rem;
+                border-bottom: 1px solid var(--border-subtle);
+                padding: 0.9rem 1rem;
             }
 
             .file-table td {
-                padding: 0.35rem 0;
+                padding: 0.2rem 0;
                 border: none;
             }
 
             .file-table td:last-child {
-                margin-top: 0.75rem;
+                margin-top: 0.5rem;
                 padding-top: 0.5rem;
-                border-top: 1px solid rgba(38, 53, 77, 0.4);
-                text-align: left !important;
             }
 
             .file-table td:last-child .btn {
                 width: 100%;
             }
-
-            .resume-alert-actions {
-                width: 100%;
-            }
-
-            .resume-alert-actions .btn {
-                flex: 1 1 120px;
-            }
         }
 
         @media (prefers-reduced-motion: reduce) {
-            * {
-                transition: none !important;
-                animation: none !important;
-            }
+            * { transition: none !important; animation: none !important; }
         }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <header>
-        <h1>QuickShare</h1>
-        <p>Fast • Secure • Resumable Local Network Transfers</p>
-    </header>
+<nav class="app-nav" aria-label="Main Navigation">
+    <div class="nav-inner">
+        <a href="/" class="brand-group" aria-label="QuickShare Home">
+            <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 17l9.2-9.2M17 17V7H7"/>
+            </svg>
+            <span class="brand-title">QuickShare</span>
+            <span class="brand-badge">LAN</span>
+        </a>
 
-    <!-- LAN Connection Info Card -->
-    <div class="card lan-card" aria-label="Local Network Status">
-        <div class="lan-info">
-            <div class="lan-indicator" title="Server is active on LAN"></div>
-            <div class="lan-details">
-                <span class="lan-title">Local Network Sharing Active</span>
-                <span class="lan-url" id="lanUrlText">{{ lan_url }}</span>
-            </div>
-        </div>
-        <div class="lan-actions">
-            <button class="btn btn-sm btn-secondary" id="copyUrlBtn" onclick="copyLanUrl()">Copy Address</button>
-            <button class="btn btn-sm" onclick="openQrModal()">📱 Mobile QR</button>
+        <div class="nav-actions">
+            <button class="lan-pill-btn" onclick="openQrModal()" aria-label="Open Local Network details and QR code">
+                <div class="status-dot"></div>
+                <span>Local network</span>
+                <span class="lan-ip-text">{{ lan_ip }}:{{ port }}</span>
+            </button>
         </div>
     </div>
+</nav>
 
-    <!-- QR Code Modal -->
-    <div class="qr-modal-overlay" id="qrModal" onclick="closeQrModal(event)">
-        <div class="qr-modal-card" onclick="event.stopPropagation()">
-            <div style="font-weight: 700; font-size: 1.15rem;">Scan on Mobile</div>
-            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: -0.5rem;">
-                Connect phone to the same Wi-Fi network and scan to open QuickShare:
-            </p>
-            <div class="qr-image-container" id="qrContainer">
-                {% if qr_svg %}
-                    {{ qr_svg|safe }}
-                {% else %}
-                    <img src="/qr" alt="Scan to connect on mobile" style="width:100%; height:100%;">
-                {% endif %}
-            </div>
-            <div style="font-size: 0.85rem; font-weight: 600; color: var(--primary);">{{ lan_url }}</div>
-            <button class="btn btn-sm btn-secondary" style="width: 100%;" onclick="closeQrModal()">Close</button>
-        </div>
-    </div>
+<main class="workspace">
+    <!-- Interrupted Upload Recovery Container -->
+    <div id="resumeContainer" aria-live="polite"></div>
 
-    <!-- Upload Card -->
-    <main class="card" aria-label="File Upload Section">
-        <div class="card-title">
-            <span>Upload Files</span>
+    <!-- Upload Section -->
+    <section aria-labelledby="uploadSectionHeading">
+        <div class="section-header">
+            <h2 class="section-title" id="uploadSectionHeading">Share Files</h2>
         </div>
 
-        <div id="resumeContainer" aria-live="polite"></div>
-
-        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="File dropzone. Click or tap to browse files" onclick="document.getElementById('fileInput').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('fileInput').click();}">
-            <div class="dropzone-icon" aria-hidden="true">📁</div>
-            <div class="dropzone-text">
-                <span class="desktop-only-text">Drop files here or click to browse</span>
-                <span class="mobile-only-text">Tap to select files</span>
+        <div class="dropzone-container" id="dropzone" tabindex="0" role="button" aria-label="File drop area. Drop files to share or click to browse" onclick="document.getElementById('fileInput').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('fileInput').click();}">
+            <div class="dropzone-icon-box">
+                <svg class="svg-icon" style="width: 20px; height: 20px;" viewBox="0 0 24 24">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                </svg>
             </div>
-            <div class="dropzone-subtext">Automatic chunking, integrity verification & resume support</div>
+            <div class="dropzone-text-group">
+                <div class="dropzone-title">
+                    <span class="desktop-text">Drop files here to share</span>
+                    <span class="mobile-text">Select files to share</span>
+                </div>
+                <div class="dropzone-subtitle">Chunked · Resumable · End-to-end verified</div>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation(); document.getElementById('fileInput').click()">Browse files</button>
             <input type="file" id="fileInput" class="file-input" multiple onchange="handleFileSelection(event)">
         </div>
 
-        <div class="upload-queue" id="uploadQueue" aria-live="polite"></div>
-    </main>
+        <div class="transfer-list" id="uploadQueue" style="margin-top: 1rem;" aria-live="polite"></div>
+    </section>
 
-    <!-- Available Files Card -->
-    <section class="card" aria-label="Available Files Section">
-        <div class="file-list-header">
-            <div class="card-title" style="margin-bottom: 0;">
-                <span>Available Files (<span id="fileCount">{{ files|length }}</span>)</span>
-            </div>
+    <!-- Available Files Section -->
+    <section aria-labelledby="filesSectionHeading">
+        <div class="section-header">
+            <h2 class="section-title" id="filesSectionHeading">Available Files (<span id="fileCount">{{ files|length }}</span>)</h2>
+        </div>
+
+        <div class="files-container">
             {% if files %}
-            <input type="search" id="fileSearch" class="search-input" placeholder="Search files..." aria-label="Search available files" oninput="filterFiles()">
+            <div class="files-toolbar">
+                <div class="search-box">
+                    <svg class="search-icon svg-icon" viewBox="0 0 24 24">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="search" id="fileSearch" class="search-input" placeholder="Filter files..." aria-label="Filter available files" oninput="filterFiles()">
+                </div>
+            </div>
+
+            <table class="file-table" id="fileTable">
+                <thead>
+                    <tr>
+                        <th scope="col">Name</th>
+                        <th scope="col">Size</th>
+                        <th scope="col">Added</th>
+                        <th scope="col" style="text-align: right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in files %}
+                    <tr class="file-row">
+                        <td>
+                            <div class="file-name-cell">
+                                <svg class="file-icon svg-icon" viewBox="0 0 24 24">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                </svg>
+                                <span class="file-name-text">{{ f.name }}</span>
+                            </div>
+                        </td>
+                        <td class="file-size-cell">{{ f.size_str }}</td>
+                        <td class="file-date-cell">{{ f.mtime_str }}</td>
+                        <td style="text-align: right;">
+                            <a href="/download/{{ f.name }}" class="btn btn-sm" download aria-label="Download {{ f.name }}">
+                                <svg class="svg-icon" viewBox="0 0 24 24">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                                </svg>
+                                <span>Download</span>
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-state-title">No files available yet</div>
+                <div class="empty-state-subtitle">Files shared from your devices will appear here for download.</div>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+</main>
+
+<!-- Local Network QR Modal -->
+<div class="modal-overlay" id="qrModal" onclick="closeQrModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <span class="modal-title">Connect Mobile Device</span>
+            <button class="btn btn-icon-only" onclick="closeQrModal()" aria-label="Close dialog">
+                <svg class="svg-icon" viewBox="0 0 24 24">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+
+        <div class="qr-card">
+            {% if qr_svg %}
+                {{ qr_svg|safe }}
+            {% else %}
+                <img src="/qr" alt="Scan QR code to connect" style="width:100%; height:100%;">
             {% endif %}
         </div>
 
-        {% if files %}
-        <table class="file-table" id="fileTable">
-            <thead>
-                <tr>
-                    <th scope="col">Filename</th>
-                    <th scope="col">Size</th>
-                    <th scope="col">Uploaded</th>
-                    <th scope="col" style="text-align: right;">Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for f in files %}
-                <tr class="file-row">
-                    <td>
-                        <div class="file-name-cell">
-                            <span aria-hidden="true">📄</span>
-                            <span class="file-name-text">{{ f.name }}</span>
-                        </div>
-                    </td>
-                    <td style="color: var(--text-secondary); font-size: 0.88rem;">{{ f.size_str }}</td>
-                    <td style="color: var(--text-muted); font-size: 0.85rem;">{{ f.mtime_str }}</td>
-                    <td style="text-align: right;">
-                        <a href="/download/{{ f.name }}" class="btn btn-sm" download aria-label="Download {{ f.name }}">Download</a>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <div class="empty-state">
-            No files available for download yet. Upload a file above!
+        <div class="modal-url-box">
+            <span class="modal-url-text" id="lanUrlText">{{ lan_url }}</span>
+            <button class="btn btn-sm" id="copyUrlBtn" onclick="copyLanUrl()">
+                <svg class="svg-icon" id="copyIcon" viewBox="0 0 24 24">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span id="copyBtnText">Copy</span>
+            </button>
         </div>
-        {% endif %}
-    </section>
+    </div>
 </div>
+
+<div class="toast-container" id="toastContainer"></div>
 
 <script>
 // ---------------------------------------------------------------------------
@@ -1025,7 +1213,6 @@ const UPLOAD_CONCURRENCY = 3;       // 3 concurrent chunk workers per file
 const MAX_CHUNK_RETRIES = 5;        // Max retry attempts per chunk with exponential backoff
 const STORAGE_KEY = "quickshare_active_uploads";
 
-// Active uploaders map (elementId -> ChunkedUploader)
 let activeUploaders = new Map();
 
 // Helper: Format bytes
@@ -1037,7 +1224,7 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Helper: Format seconds to user-friendly ETA string
+// Helper: Format seconds to clean ETA string
 function formatTime(seconds) {
     if (!isFinite(seconds) || seconds < 0) return '--';
     if (seconds < 60) return Math.round(seconds) + 's';
@@ -1046,23 +1233,37 @@ function formatTime(seconds) {
     return m + 'm ' + s + 's';
 }
 
-// Helper: Escape HTML to prevent XSS
+// Helper: Escape HTML
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
 
-// Helper: Copy LAN URL to clipboard
+// Helper: Toast Notifications
+function showToast(message) {
+    const container = document.getElementById("toastContainer");
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.2s ease';
+        setTimeout(() => toast.remove(), 200);
+    }, 2800);
+}
+
+// Helper: Copy LAN URL
 function copyLanUrl() {
     const url = document.getElementById("lanUrlText").textContent;
     navigator.clipboard.writeText(url).then(() => {
-        const btn = document.getElementById("copyUrlBtn");
-        const originalText = btn.textContent;
-        btn.textContent = "Copied!";
-        setTimeout(() => { btn.textContent = originalText; }, 2000);
+        const copyText = document.getElementById("copyBtnText");
+        copyText.textContent = "Copied";
+        showToast("Address copied to clipboard");
+        setTimeout(() => { copyText.textContent = "Copy"; }, 2000);
     }).catch(() => {
-        alert("LAN URL: " + url);
+        showToast("Address: " + url);
     });
 }
 
@@ -1114,19 +1315,19 @@ function checkSavedSessions() {
     sessionKeys.forEach(uploadId => {
         const session = sessions[uploadId];
         const banner = document.createElement("div");
-        banner.className = "resume-alert";
+        banner.className = "session-resume-alert";
         banner.id = `resume-alert-${uploadId}`;
         banner.innerHTML = `
-            <div class="resume-alert-text">
-                ⚠️ <strong>Interrupted upload detected:</strong> ${escapeHtml(session.filename)} (${formatBytes(session.total_size)})<br>
-                <small style="color: var(--text-secondary);">Select the original file to resume without re-uploading completed chunks.</small>
+            <div class="session-resume-text">
+                <strong>Interrupted transfer:</strong> ${escapeHtml(session.filename)} (${formatBytes(session.total_size)})<br>
+                <span style="color: var(--text-secondary); font-size: 0.8rem;">Select the original file to resume without re-uploading completed chunks.</span>
             </div>
-            <div class="resume-alert-actions">
-                <label class="btn btn-sm" style="cursor: pointer;">
+            <div class="session-resume-actions">
+                <label class="btn btn-sm btn-primary" style="cursor: pointer;">
                     Resume
                     <input type="file" style="display:none;" onchange="resumeSessionFile(event, '${uploadId}')">
                 </label>
-                <button class="btn btn-sm btn-secondary" onclick="dismissSavedSession('${uploadId}')">Dismiss</button>
+                <button class="btn btn-sm" onclick="dismissSavedSession('${uploadId}')">Dismiss</button>
             </div>
         `;
         resumeContainer.appendChild(banner);
@@ -1185,7 +1386,7 @@ class ChunkedUploader {
         this.bytesSinceLastCheck = 0;
         this.currentSpeed = 0;
         
-        // Abort controllers for all active chunk requests
+        // Abort controllers for active chunk requests
         this.abortControllers = new Map();
         
         // Unique DOM card ID
@@ -1197,29 +1398,29 @@ class ChunkedUploader {
         let card = document.getElementById(this.elementId);
         if (!card) {
             card = document.createElement("div");
-            card.className = "upload-item";
+            card.className = "transfer-card";
             card.id = this.elementId;
             queue.prepend(card);
         }
 
         card.innerHTML = `
-            <div class="upload-header">
-                <div class="upload-info">
-                    <div class="upload-filename" title="${escapeHtml(this.filename)}">${escapeHtml(this.filename)}</div>
-                    <div class="upload-meta">${formatBytes(this.totalSize)} • <span id="${this.elementId}-chunks">0/${this.totalChunks} chunks</span></div>
+            <div class="transfer-header">
+                <div class="transfer-title-group">
+                    <div class="transfer-filename" title="${escapeHtml(this.filename)}">${escapeHtml(this.filename)}</div>
+                    <div class="transfer-meta">${formatBytes(this.totalSize)} · <span id="${this.elementId}-chunks">0/${this.totalChunks} chunks</span></div>
                 </div>
-                <div class="upload-actions">
-                    <span class="badge badge-uploading" id="${this.elementId}-badge">UPLOADING</span>
-                    <button class="btn btn-sm btn-secondary" id="${this.elementId}-pause-btn" onclick="togglePauseUpload('${this.elementId}')">Pause</button>
+                <div class="transfer-actions">
+                    <span class="status-badge badge-uploading" id="${this.elementId}-badge">UPLOADING</span>
+                    <button class="btn btn-sm" id="${this.elementId}-pause-btn" onclick="togglePauseUpload('${this.elementId}')">Pause</button>
                     <button class="btn btn-sm btn-danger" id="${this.elementId}-cancel-btn" onclick="cancelUpload('${this.elementId}')">Cancel</button>
                 </div>
             </div>
-            <div class="progress-bar-container" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="${this.elementId}-progress-container">
-                <div class="progress-bar-fill" id="${this.elementId}-fill" style="width: 0%"></div>
+            <div class="progress-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="${this.elementId}-progress-container">
+                <div class="progress-fill" id="${this.elementId}-fill" style="width: 0%"></div>
             </div>
-            <div class="upload-stats">
-                <span id="${this.elementId}-progress-text">0% • 0 B / ${formatBytes(this.totalSize)}</span>
-                <span id="${this.elementId}-speed-text">-- KB/s • ETA: --</span>
+            <div class="transfer-footer">
+                <span id="${this.elementId}-progress-text">0% · 0 B / ${formatBytes(this.totalSize)}</span>
+                <span id="${this.elementId}-speed-text">-- MB/s · ETA: --</span>
             </div>
         `;
     }
@@ -1270,7 +1471,7 @@ class ChunkedUploader {
         }
 
         if (progressText) {
-            progressText.textContent = `${percent}% • ${formatBytes(this.uploadedBytes)} / ${formatBytes(this.totalSize)}`;
+            progressText.textContent = `${percent}% · ${formatBytes(this.uploadedBytes)} / ${formatBytes(this.totalSize)}`;
         }
 
         // Update ETA & Speed text
@@ -1278,23 +1479,23 @@ class ChunkedUploader {
             if (this.status === 'uploading') {
                 const remainingBytes = Math.max(0, this.totalSize - this.uploadedBytes);
                 const etaSeconds = this.currentSpeed > 0 ? (remainingBytes / this.currentSpeed) : 0;
-                speedText.textContent = `${formatBytes(this.currentSpeed)}/s • ETA: ${formatTime(etaSeconds)}`;
+                speedText.textContent = `${formatBytes(this.currentSpeed)}/s · ${formatTime(etaSeconds)} remaining`;
             } else if (this.status === 'assembling') {
-                speedText.textContent = `Verifying integrity & finalizing file...`;
+                speedText.textContent = `Verifying integrity and finalizing...`;
             } else if (this.status === 'completed') {
-                speedText.textContent = `Upload verified and complete!`;
+                speedText.textContent = `Completed and verified`;
             } else if (this.status === 'cancelled') {
-                speedText.textContent = `Upload cancelled`;
+                speedText.textContent = `Transfer cancelled`;
             } else if (this.status === 'paused') {
-                speedText.textContent = `Upload paused`;
+                speedText.textContent = `Transfer paused`;
             } else if (this.status === 'error') {
-                speedText.textContent = `${this.errorMessage || 'Upload failed'}`;
+                speedText.textContent = `${this.errorMessage || 'Transfer failed'}`;
             }
         }
 
         // Update Status Badges & Buttons
         if (badge) {
-            badge.className = `badge badge-${this.status}`;
+            badge.className = `status-badge badge-${this.status}`;
             badge.textContent = this.status.toUpperCase();
         }
 
@@ -1397,10 +1598,11 @@ class ChunkedUploader {
                 this.status = 'completed';
                 removeUploadSession(this.uploadId);
                 this.updateUI();
+                showToast("File uploaded successfully");
 
                 setTimeout(() => {
                     window.location.reload();
-                }, 1200);
+                }, 1000);
             }
 
         } catch (err) {
@@ -1459,7 +1661,7 @@ class ChunkedUploader {
                 this.status = 'completed';
                 removeUploadSession(this.uploadId);
                 this.updateUI();
-                setTimeout(() => location.reload(), 1200);
+                setTimeout(() => location.reload(), 1000);
                 return;
             }
 
@@ -1477,7 +1679,7 @@ class ChunkedUploader {
                     this.status = 'completed';
                     removeUploadSession(this.uploadId);
                     this.updateUI();
-                    setTimeout(() => location.reload(), 1200);
+                    setTimeout(() => location.reload(), 1000);
                 } else {
                     this.status = 'error';
                     this.errorMessage = completeData.error || "Assembly failed";
@@ -1509,7 +1711,7 @@ class ChunkedUploader {
                         this.status = 'completed';
                         removeUploadSession(this.uploadId);
                         this.updateUI();
-                        setTimeout(() => location.reload(), 1200);
+                        setTimeout(() => location.reload(), 1000);
                     } else {
                         this.status = 'error';
                         this.errorMessage = completeData.error || "Assembly failed";
@@ -1644,16 +1846,16 @@ class ChunkedUploader {
         this.uploadGeneration++;
         this.isLoopRunning = false;
 
-        // Abort in-flight fetch requests immediately
         for (let controller of this.abortControllers.values()) {
             controller.abort();
         }
         this.abortControllers.clear();
         this.updateUI();
+        showToast("Transfer paused");
     }
 
     resume() {
-        // Delegates directly to unified recovery pipeline with isUserResume = true
+        showToast("Resuming transfer");
         return this.reconcileAndResume(true);
     }
 
@@ -1662,13 +1864,11 @@ class ChunkedUploader {
         this.uploadGeneration++;
         this.isLoopRunning = false;
 
-        // Abort all active fetch requests immediately
         for (let controller of this.abortControllers.values()) {
             controller.abort();
         }
         this.abortControllers.clear();
 
-        // Send cancellation to server to delete cache
         if (this.uploadId) {
             try {
                 await fetch(`/upload/cancel/${this.uploadId}`, { method: 'POST' });
@@ -1679,6 +1879,7 @@ class ChunkedUploader {
         }
 
         this.updateUI();
+        showToast("Transfer cancelled");
     }
 }
 
@@ -1761,7 +1962,8 @@ function filterFiles() {
             row.style.display = 'none';
         }
     });
-    document.getElementById('fileCount').textContent = visible;
+    const fileCount = document.getElementById('fileCount');
+    if (fileCount) fileCount.textContent = visible;
 }
 
 // Page visibility and connection recovery
@@ -1775,9 +1977,14 @@ document.addEventListener('visibilitychange', () => {
 
 window.addEventListener('online', () => {
     console.info("Network online detected: reconciling active uploads");
+    showToast("Network restored");
     activeUploaders.forEach(uploader => {
         uploader.reconcileAndResume(false);
     });
+});
+
+window.addEventListener('offline', () => {
+    showToast("Network connection lost");
 });
 
 // Init
@@ -1809,7 +2016,7 @@ def index():
                         "size": stat.st_size,
                         "size_str": format_bytes(stat.st_size),
                         "mtime": stat.st_mtime,
-                        "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                        "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime("%b %d, %Y")
                     })
             file_list.sort(key=lambda x: x["mtime"], reverse=True)
         except Exception as e:
@@ -1823,6 +2030,7 @@ def index():
         UPLOAD_HTML,
         files=file_list,
         lan_ip=lan_ip,
+        port=PORT,
         lan_url=lan_url,
         qr_svg=qr_svg
     )
@@ -2171,7 +2379,6 @@ def upload_complete():
         latest_meta["safe_filename"] = final_filename
         latest_meta["updated_at"] = time.time()
         
-        # Safe final metadata write
         if not save_metadata(upload_id, latest_meta):
             logger.warning(f"Final metadata persistence failed for upload_id={upload_id}, but file was safely finalized to '{final_filename}'")
 
