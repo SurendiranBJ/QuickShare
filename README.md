@@ -44,12 +44,8 @@ QuickShare is designed specifically for trusted local network transfers. It does
 
 ```
 QuickShare/
-├── .github/
-│   └── workflows/
-│       └── tests.yml      # GitHub Actions CI matrix workflow (Python 3.10, 3.11, 3.12)
 ├── Quickshare.py          # Flask application, dynamic LAN discovery & embedded responsive UI
 ├── requirements.txt       # Production dependencies (Flask, Werkzeug, qrcode)
-├── test_quickshare.py     # 29-scenario automated concurrency and reliability test suite
 ├── README.md              # Complete operational and technical manual
 ├── .gitignore             # Excludes uploads/, cache/, venv/, and temporary runtime files
 ├── uploads/               # Verified completed files (auto-created on startup)
@@ -310,53 +306,10 @@ cache/
 
 ---
 
-## 12. Automated Test Suite
+## 12. Manual Device Testing Checklist
 
-QuickShare includes a 29-scenario automated integration test suite:
+The following client workflows can be verified across devices on your local network:
 
-```powershell
-python test_quickshare.py
-```
-
-### Verified Automated Scenarios:
-1. `test_01_small_file_upload`: Small file single-chunk transfer.
-2. `test_02_large_file_upload`: Multi-chunk 5MB transfer and SHA-256 verification.
-3. `test_03_zero_byte_file`: 0-byte file upload and empty hash verification.
-4. `test_04_chunk_rejected_during_assembly`: Verifies HTTP 409 rejection during assembly.
-5. `test_05_cancel_at_10_percent`: Early cancellation and cache purge.
-6. `test_06_cancel_at_50_percent`: Mid-transfer cancellation.
-7. `test_07_cancel_near_completion`: 90% cancellation verification.
-8. `test_08_network_interruption`: Verifies cache retention during connection drop.
-9. `test_09_resume_after_interruption`: Reconnection and missing-chunk-only transfer.
-10. `test_10_duplicate_chunk`: Repeated upload of the same chunk (idempotency).
-11. `test_11_genuine_concurrent_uploads`: Multi-threaded parallel file uploads via `ThreadPoolExecutor`.
-12. `test_12_filename_collision_handling`: Safe deduplication (`duplicate_name (1).txt`).
-13. `test_13_assembling_upload_protected_from_cleanup`: Assembling uploads exempt from cache purge.
-14. `test_14_server_restart_cache_persistence`: Chunk state persisted across server restarts.
-15. `test_15_expired_abandoned_cache_cleanup`: Expired cache cleanup verification.
-16. `test_16_completed_file_download`: Verified download from `uploads/`.
-17. `test_17_incomplete_files_not_downloadable`: Blocks downloads of incomplete/cache files.
-18. `test_18_security_and_path_traversal`: Blocks `../`, fake UUIDs, and traversal attacks.
-19. `test_19_streaming_assembly_memory_efficiency`: Fixed 64KB buffer multi-chunk streaming.
-20. `test_20_repeated_completion_request`: Idempotent completion call handling.
-21. `test_21_repeated_cancellation`: Idempotent cancellation call handling.
-22. `test_22_invalid_upload_id`: 400/404 handling on invalid UUIDs.
-23. `test_23_invalid_chunk_index`: Bounds validation (negative/oversized chunk indexes).
-24. `test_24_invalid_total_chunks`: Mismatch rejection on chunk count.
-25. `test_25_cancel_complete_race`: Multi-threaded cancel vs complete race resolution.
-26. `test_26_metadata_corruption_handling`: Safe recovery on invalid JSON metadata.
-27. `test_27_edge_file_sizes`: 1-byte, 1 KB, 4.9MB, 5MB, 5MB+1, 10MB, 10MB+1 chunk boundaries.
-28. `test_28_active_and_paused_cache_preserved_during_cleanup`: Verifies active/paused uploads are not expired prematurely.
-29. `test_29_qr_endpoint_and_lan_ip_detection`: Dynamic LAN IP resolution and SVG QR endpoint verification.
-
----
-
-## 13. Manual Browser & Device Testing
-
-The following client workflows should be verified across devices on your local network:
-
-### Recommended Checklist:
-- **Devices to Test**: Desktop PC (Server), Laptop, Android phone, iPhone.
 - **QR Connection**: Scan QR code from phone camera, verify homepage loads instantly over Wi-Fi.
 - **Phone to PC Transfer**: Select a photo/video on phone, verify fast chunked upload to PC.
 - **PC to Phone Download**: Download uploaded files on mobile and verify file integrity.
@@ -367,14 +320,14 @@ The following client workflows should be verified across devices on your local n
 
 ---
 
-## 14. Known Limitations & Operating Realities
+## 13. Known Limitations & Operating Realities
 
 - **Browser File Handle Security**: Browsers do not permit JavaScript to retain direct file system handles across hard page reloads. When reloading during an upload, QuickShare displays the interrupted session notification, prompting the user to re-select the matching file to instantly resume from the exact missing chunk.
 - **Operating System Background Throttling**: Mobile operating systems (iOS/Android) and desktop browsers throttle JavaScript timers and background network bandwidth when a tab is minimized or phone screen is locked. QuickShare adapts gracefully using promise queues and exponential backoff, resuming automatically when the tab becomes active.
 
 ---
 
-## 15. Production Deployment Notes
+## 14. Production Deployment Notes
 
 For production environments, run QuickShare behind a WSGI server:
 
@@ -390,7 +343,7 @@ waitress-serve --port=5000 Quickshare:app
 
 ---
 
-## 16. Quick Start
+## 15. Quick Start
 
 1. **Install dependencies**:
    ```powershell

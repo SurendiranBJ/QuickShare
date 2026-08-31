@@ -14,7 +14,9 @@ uploads/
 cache/
 *.tmp
 
-# Personal scratch scripts & local tests
+# Private tests and scratch scripts
+test_quickshare.py
+test_*.py
 aura.py
 scratch/
 
