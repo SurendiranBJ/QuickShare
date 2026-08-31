@@ -276,34 +276,36 @@ if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
     cleanup_thread.start()
 
 # -----------------------------------------------------------------------------
-# Frontend HTML / UI Template
+# Frontend HTML / UI Template (Fully Responsive & Accessible)
 # -----------------------------------------------------------------------------
 UPLOAD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QuickShare — Fast & Resumable File Sharing</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <title>QuickShare — Fast, Secure & Resumable File Transfers</title>
     <style>
         :root {
-            --bg-color: #0f172a;
-            --surface-color: #1e293b;
-            --surface-hover: #334155;
-            --card-border: #334155;
+            --bg-color: #0b0f19;
+            --surface-card: #151e2e;
+            --surface-hover: #222f46;
+            --card-border: #26354d;
             --primary: #38bdf8;
             --primary-hover: #0ea5e9;
+            --primary-gradient: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
             --primary-light: rgba(56, 189, 248, 0.12);
             --success: #10b981;
             --success-light: rgba(16, 185, 129, 0.12);
             --danger: #ef4444;
             --danger-hover: #dc2626;
-            --danger-light: rgba(239, 68, 68, 0.12);
+            --danger-light: rgba(239, 68, 68, 0.15);
             --warning: #f59e0b;
+            --warning-light: rgba(245, 158, 11, 0.15);
             --text-primary: #f8fafc;
             --text-secondary: #94a3b8;
             --text-muted: #64748b;
-            --border-radius: 12px;
+            --border-radius: 14px;
             --transition: all 0.2s ease-in-out;
         }
 
@@ -312,6 +314,7 @@ UPLOAD_HTML = """
             margin: 0;
             padding: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
@@ -321,27 +324,29 @@ UPLOAD_HTML = """
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 2.5rem 1rem;
+            padding: clamp(1rem, 3vw, 2.5rem) 1rem;
+            overflow-x: hidden;
         }
 
         .container {
-            width: 100%;
-            max-width: 860px;
+            width: min(100% - 1rem, 880px);
+            margin-inline: auto;
             display: flex;
             flex-direction: column;
-            gap: 2rem;
+            gap: 1.75rem;
         }
 
+        /* Header */
         header {
             text-align: center;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.25rem;
         }
 
         header h1 {
-            font-size: 2.4rem;
+            font-size: clamp(1.85rem, 5vw, 2.6rem);
             font-weight: 800;
-            letter-spacing: -0.02em;
-            background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+            letter-spacing: -0.03em;
+            background: var(--primary-gradient);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 0.35rem;
@@ -349,19 +354,20 @@ UPLOAD_HTML = """
 
         header p {
             color: var(--text-secondary);
-            font-size: 1rem;
+            font-size: clamp(0.9rem, 2.5vw, 1.05rem);
         }
 
+        /* Cards */
         .card {
-            background-color: var(--surface-color);
+            background-color: var(--surface-card);
             border: 1px solid var(--card-border);
             border-radius: var(--border-radius);
-            padding: 1.75rem;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+            padding: clamp(1.2rem, 3vw, 1.85rem);
+            box-shadow: 0 12px 30px -8px rgba(0, 0, 0, 0.45);
         }
 
         .card-title {
-            font-size: 1.25rem;
+            font-size: clamp(1.1rem, 3vw, 1.3rem);
             font-weight: 700;
             margin-bottom: 1.25rem;
             display: flex;
@@ -374,45 +380,56 @@ UPLOAD_HTML = """
         .dropzone {
             border: 2px dashed var(--card-border);
             border-radius: var(--border-radius);
-            padding: 2.5rem 1.5rem;
+            padding: clamp(1.75rem, 4vw, 2.75rem) 1.25rem;
             text-align: center;
             cursor: pointer;
             transition: var(--transition);
-            background: rgba(15, 23, 42, 0.4);
+            background: rgba(11, 15, 25, 0.5);
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 0.75rem;
+            gap: 0.6rem;
         }
 
-        .dropzone:hover, .dropzone.dragover {
+        .dropzone:hover, .dropzone.dragover, .dropzone:focus-visible {
             border-color: var(--primary);
             background: var(--primary-light);
+            outline: none;
         }
 
         .dropzone-icon {
-            font-size: 2.5rem;
+            font-size: clamp(2.2rem, 6vw, 3rem);
             color: var(--primary);
+            line-height: 1;
         }
 
         .dropzone-text {
-            font-size: 1.05rem;
+            font-size: clamp(1rem, 2.8vw, 1.15rem);
             font-weight: 600;
             color: var(--text-primary);
         }
 
         .dropzone-subtext {
-            font-size: 0.85rem;
+            font-size: clamp(0.8rem, 2.2vw, 0.9rem);
             color: var(--text-secondary);
+        }
+
+        .desktop-only-text { display: inline; }
+        .mobile-only-text { display: none; }
+
+        @media (max-width: 640px) {
+            .desktop-only-text { display: none; }
+            .mobile-only-text { display: inline; }
         }
 
         .file-input {
             display: none;
         }
 
+        /* Buttons */
         .btn {
             background-color: var(--primary);
-            color: #0f172a;
+            color: #0b0f19;
             border: none;
             border-radius: 8px;
             padding: 0.65rem 1.25rem;
@@ -422,12 +439,15 @@ UPLOAD_HTML = """
             transition: var(--transition);
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 0.5rem;
             text-decoration: none;
+            min-height: 40px;
         }
 
-        .btn:hover {
+        .btn:hover, .btn:focus-visible {
             background-color: var(--primary-hover);
+            outline: none;
         }
 
         .btn-danger {
@@ -435,22 +455,24 @@ UPLOAD_HTML = """
             color: #ffffff;
         }
 
-        .btn-danger:hover {
+        .btn-danger:hover, .btn-danger:focus-visible {
             background-color: var(--danger-hover);
         }
 
         .btn-secondary {
             background-color: var(--surface-hover);
             color: var(--text-primary);
+            border: 1px solid var(--card-border);
         }
 
-        .btn-secondary:hover {
-            background-color: #475569;
+        .btn-secondary:hover, .btn-secondary:focus-visible {
+            background-color: #33435e;
         }
 
         .btn-sm {
-            padding: 0.4rem 0.75rem;
+            padding: 0.45rem 0.85rem;
             font-size: 0.85rem;
+            min-height: 36px;
             border-radius: 6px;
         }
 
@@ -459,17 +481,17 @@ UPLOAD_HTML = """
             display: flex;
             flex-direction: column;
             gap: 1rem;
-            margin-top: 1.5rem;
+            margin-top: 1.25rem;
         }
 
         .upload-item {
-            background: rgba(15, 23, 42, 0.6);
+            background: rgba(11, 15, 25, 0.65);
             border: 1px solid var(--card-border);
-            border-radius: 10px;
-            padding: 1.25rem;
+            border-radius: 12px;
+            padding: clamp(1rem, 2.5vw, 1.35rem);
             display: flex;
             flex-direction: column;
-            gap: 0.75rem;
+            gap: 0.85rem;
             transition: var(--transition);
         }
 
@@ -477,27 +499,27 @@ UPLOAD_HTML = """
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            gap: 1rem;
+            gap: 0.75rem;
+            flex-wrap: wrap;
         }
 
         .upload-info {
             display: flex;
             flex-direction: column;
             gap: 0.25rem;
-            overflow: hidden;
+            flex: 1 1 240px;
+            min-width: 0;
         }
 
         .upload-filename {
             font-weight: 600;
-            font-size: 0.95rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 450px;
+            font-size: clamp(0.95rem, 2.6vw, 1.05rem);
+            word-break: break-word;
+            line-height: 1.3;
         }
 
         .upload-meta {
-            font-size: 0.8rem;
+            font-size: 0.82rem;
             color: var(--text-secondary);
         }
 
@@ -505,39 +527,45 @@ UPLOAD_HTML = """
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            flex-shrink: 0;
+            flex-wrap: wrap;
+            margin-left: auto;
         }
 
+        /* Semantic Badges */
         .badge {
             font-size: 0.75rem;
-            font-weight: 600;
-            padding: 0.25rem 0.5rem;
+            font-weight: 700;
+            padding: 0.3rem 0.6rem;
             border-radius: 6px;
             text-transform: uppercase;
             letter-spacing: 0.05em;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
         }
 
         .badge-uploading { background: var(--primary-light); color: var(--primary); }
-        .badge-assembling { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+        .badge-assembling { background: var(--warning-light); color: var(--warning); }
         .badge-completed { background: var(--success-light); color: var(--success); }
         .badge-cancelled { background: var(--danger-light); color: var(--danger); }
         .badge-error { background: var(--danger-light); color: var(--danger); }
-        .badge-paused { background: var(--surface-hover); color: var(--text-secondary); }
+        .badge-paused { background: rgba(148, 163, 184, 0.15); color: var(--text-secondary); }
 
+        /* Progress Bar */
         .progress-bar-container {
             width: 100%;
-            height: 8px;
-            background-color: rgba(51, 65, 85, 0.6);
+            height: 9px;
+            background-color: rgba(38, 53, 77, 0.6);
             border-radius: 9999px;
             overflow: hidden;
         }
 
         .progress-bar-fill {
             height: 100%;
-            background: linear-gradient(90deg, #38bdf8, #818cf8);
+            background: var(--primary-gradient);
             border-radius: 9999px;
             width: 0%;
-            transition: width 0.15s ease-out;
+            transition: width 0.2s ease-out;
         }
 
         .progress-bar-fill.completed {
@@ -547,51 +575,65 @@ UPLOAD_HTML = """
         .upload-stats {
             display: flex;
             justify-content: space-between;
-            font-size: 0.8rem;
+            align-items: center;
+            font-size: 0.82rem;
             color: var(--text-secondary);
+            flex-wrap: wrap;
+            gap: 0.4rem;
         }
 
         /* Resumable Session Alert */
         .resume-alert {
             background: rgba(56, 189, 248, 0.08);
-            border: 1px solid rgba(56, 189, 248, 0.3);
+            border: 1px solid rgba(56, 189, 248, 0.35);
             border-radius: 10px;
-            padding: 1rem;
+            padding: 1rem 1.15rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
             gap: 1rem;
-            margin-bottom: 1rem;
+            margin-bottom: 1.25rem;
+            flex-wrap: wrap;
         }
 
         .resume-alert-text {
             font-size: 0.9rem;
             color: var(--text-primary);
+            flex: 1 1 260px;
+            line-height: 1.4;
         }
 
-        /* File List */
+        .resume-alert-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        /* File List & Responsive Table-to-Card */
         .file-list-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 1rem;
+            margin-bottom: 1.25rem;
+            gap: 0.75rem;
+            flex-wrap: wrap;
         }
 
         .search-input {
-            background-color: rgba(15, 23, 42, 0.6);
+            background-color: rgba(11, 15, 25, 0.6);
             border: 1px solid var(--card-border);
             border-radius: 8px;
-            padding: 0.5rem 0.85rem;
+            padding: 0.55rem 0.85rem;
             color: var(--text-primary);
-            font-size: 0.85rem;
+            font-size: 0.88rem;
             outline: none;
-            width: 200px;
+            width: min(100%, 240px);
             transition: var(--transition);
         }
 
         .search-input:focus {
             border-color: var(--primary);
-            width: 250px;
+            width: min(100%, 280px);
         }
 
         .file-table {
@@ -612,20 +654,20 @@ UPLOAD_HTML = """
 
         .file-table td {
             padding: 0.9rem 1rem;
-            border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+            border-bottom: 1px solid rgba(38, 53, 77, 0.5);
             vertical-align: middle;
         }
 
         .file-table tr:hover td {
-            background-color: rgba(51, 65, 85, 0.2);
+            background-color: rgba(34, 47, 70, 0.3);
         }
 
         .file-name-cell {
             font-weight: 500;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            word-break: break-all;
+            gap: 0.6rem;
+            word-break: break-word;
         }
 
         .empty-state {
@@ -635,14 +677,78 @@ UPLOAD_HTML = """
             font-size: 0.95rem;
         }
 
+        /* -------------------------------------------------------------------------
+         * Mobile Layout Responsive Overrides
+         * ------------------------------------------------------------------------- */
         @media (max-width: 640px) {
-            body { padding: 1.5rem 0.75rem; }
-            .card { padding: 1.25rem; }
-            .upload-header { flex-direction: column; }
-            .upload-actions { width: 100%; justify-content: flex-end; }
-            .file-table th:nth-child(3), .file-table td:nth-child(3) { display: none; }
-            .search-input { width: 100%; }
-            .file-list-header { flex-direction: column; align-items: stretch; gap: 0.75rem; }
+            .btn {
+                min-height: 44px;
+                padding: 0.65rem 1rem;
+            }
+
+            .btn-sm {
+                min-height: 42px;
+                padding: 0.55rem 1rem;
+                font-size: 0.9rem;
+            }
+
+            .upload-actions {
+                width: 100%;
+                justify-content: flex-start;
+                margin-top: 0.35rem;
+            }
+
+            .upload-actions .btn {
+                flex: 1 1 100px;
+            }
+
+            /* Convert Table to Touch-Friendly Cards on Mobile */
+            .file-table, .file-table thead, .file-table tbody, .file-table th, .file-table td, .file-table tr {
+                display: block;
+            }
+
+            .file-table thead {
+                display: none;
+            }
+
+            .file-table tr {
+                background: rgba(11, 15, 25, 0.45);
+                border: 1px solid var(--card-border);
+                border-radius: 10px;
+                margin-bottom: 0.85rem;
+                padding: 1rem;
+            }
+
+            .file-table td {
+                padding: 0.35rem 0;
+                border: none;
+            }
+
+            .file-table td:last-child {
+                margin-top: 0.75rem;
+                padding-top: 0.5rem;
+                border-top: 1px solid rgba(38, 53, 77, 0.4);
+                text-align: left !important;
+            }
+
+            .file-table td:last-child .btn {
+                width: 100%;
+            }
+
+            .resume-alert-actions {
+                width: 100%;
+            }
+
+            .resume-alert-actions .btn {
+                flex: 1 1 120px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                transition: none !important;
+                animation: none !important;
+            }
         }
     </style>
 </head>
@@ -651,35 +757,38 @@ UPLOAD_HTML = """
 <div class="container">
     <header>
         <h1>QuickShare</h1>
-        <p>Reliable, chunked, and resumable file transfers</p>
+        <p>Fast • Secure • Resumable Local Transfers</p>
     </header>
 
     <!-- Upload Card -->
-    <div class="card">
+    <main class="card" aria-label="File Upload Section">
         <div class="card-title">
             <span>Upload Files</span>
         </div>
 
-        <div id="resumeContainer"></div>
+        <div id="resumeContainer" aria-live="polite"></div>
 
-        <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
-            <div class="dropzone-icon">📁</div>
-            <div class="dropzone-text">Click to choose files or drag & drop here</div>
-            <div class="dropzone-subtext">Supports files of any size with automatic chunking & resume</div>
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="File dropzone. Click or tap to browse files" onclick="document.getElementById('fileInput').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('fileInput').click();}">
+            <div class="dropzone-icon" aria-hidden="true">📁</div>
+            <div class="dropzone-text">
+                <span class="desktop-only-text">Drop files here or click to browse</span>
+                <span class="mobile-only-text">Tap to select files</span>
+            </div>
+            <div class="dropzone-subtext">Automatic chunking, integrity verification & resume support</div>
             <input type="file" id="fileInput" class="file-input" multiple onchange="handleFileSelection(event)">
         </div>
 
-        <div class="upload-queue" id="uploadQueue"></div>
-    </div>
+        <div class="upload-queue" id="uploadQueue" aria-live="polite"></div>
+    </main>
 
-    <!-- Completed Downloads Card -->
-    <div class="card">
+    <!-- Available Files Card -->
+    <section class="card" aria-label="Available Files Section">
         <div class="file-list-header">
             <div class="card-title" style="margin-bottom: 0;">
                 <span>Available Files (<span id="fileCount">{{ files|length }}</span>)</span>
             </div>
             {% if files %}
-            <input type="text" id="fileSearch" class="search-input" placeholder="Search files..." oninput="filterFiles()">
+            <input type="search" id="fileSearch" class="search-input" placeholder="Search files..." aria-label="Search available files" oninput="filterFiles()">
             {% endif %}
         </div>
 
@@ -687,10 +796,10 @@ UPLOAD_HTML = """
         <table class="file-table" id="fileTable">
             <thead>
                 <tr>
-                    <th>Filename</th>
-                    <th>Size</th>
-                    <th>Uploaded</th>
-                    <th style="text-align: right;">Action</th>
+                    <th scope="col">Filename</th>
+                    <th scope="col">Size</th>
+                    <th scope="col">Uploaded</th>
+                    <th scope="col" style="text-align: right;">Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -698,14 +807,14 @@ UPLOAD_HTML = """
                 <tr class="file-row">
                     <td>
                         <div class="file-name-cell">
-                            <span>📄</span>
+                            <span aria-hidden="true">📄</span>
                             <span class="file-name-text">{{ f.name }}</span>
                         </div>
                     </td>
-                    <td style="color: var(--text-secondary); white-space: nowrap;">{{ f.size_str }}</td>
-                    <td style="color: var(--text-muted); white-space: nowrap;">{{ f.mtime_str }}</td>
+                    <td style="color: var(--text-secondary); font-size: 0.88rem;">{{ f.size_str }}</td>
+                    <td style="color: var(--text-muted); font-size: 0.85rem;">{{ f.mtime_str }}</td>
                     <td style="text-align: right;">
-                        <a href="/download/{{ f.name }}" class="btn btn-sm" download>Download</a>
+                        <a href="/download/{{ f.name }}" class="btn btn-sm" download aria-label="Download {{ f.name }}">Download</a>
                     </td>
                 </tr>
                 {% endfor %}
@@ -716,19 +825,19 @@ UPLOAD_HTML = """
             No files available for download yet. Upload a file above!
         </div>
         {% endif %}
-    </div>
+    </section>
 </div>
 
 <script>
 // ---------------------------------------------------------------------------
 // Client Configuration
 // ---------------------------------------------------------------------------
-const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
-const UPLOAD_CONCURRENCY = 3;       // 3 concurrent chunks per file
-const MAX_CHUNK_RETRIES = 5;        // Max retry attempts per chunk
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB chunks
+const UPLOAD_CONCURRENCY = 3;       // 3 concurrent chunk workers per file
+const MAX_CHUNK_RETRIES = 5;        // Max retry attempts per chunk with exponential backoff
 const STORAGE_KEY = "quickshare_active_uploads";
 
-// State
+// Active uploaders map (elementId -> ChunkedUploader)
 let activeUploaders = new Map();
 
 // Helper: Format bytes
@@ -740,7 +849,7 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Helper: Format seconds to ETA string
+// Helper: Format seconds to user-friendly ETA string
 function formatTime(seconds) {
     if (!isFinite(seconds) || seconds < 0) return '--';
     if (seconds < 60) return Math.round(seconds) + 's';
@@ -749,7 +858,7 @@ function formatTime(seconds) {
     return m + 'm ' + s + 's';
 }
 
-// Helper: Escape HTML
+// Helper: Escape HTML to prevent XSS
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -784,7 +893,7 @@ function removeUploadSession(uploadId) {
     } catch(e) {}
 }
 
-// Check for interrupted uploads on load
+// Check for interrupted uploads on page load
 function checkSavedSessions() {
     const sessions = getSavedUploads();
     const resumeContainer = document.getElementById("resumeContainer");
@@ -800,9 +909,10 @@ function checkSavedSessions() {
         banner.id = `resume-alert-${uploadId}`;
         banner.innerHTML = `
             <div class="resume-alert-text">
-                ⚠️ <strong>Interrupted upload found:</strong> ${escapeHtml(session.filename)} (${formatBytes(session.total_size)})
+                ⚠️ <strong>Interrupted upload detected:</strong> ${escapeHtml(session.filename)} (${formatBytes(session.total_size)})<br>
+                <small style="color: var(--text-secondary);">Select the original file to resume without re-uploading completed chunks.</small>
             </div>
-            <div style="display: flex; gap: 0.5rem;">
+            <div class="resume-alert-actions">
                 <label class="btn btn-sm" style="cursor: pointer;">
                     Resume
                     <input type="file" style="display:none;" onchange="resumeSessionFile(event, '${uploadId}')">
@@ -828,7 +938,7 @@ function resumeSessionFile(event, uploadId) {
     const session = sessions[uploadId];
     if (!session) return;
 
-    // Multi-factor identity check: name, size, and lastModified
+    // Multi-factor identity check: filename, total size, and modification timestamp
     if (file.name !== session.filename || file.size !== session.total_size || (session.last_modified && file.lastModified !== session.last_modified)) {
         alert("The selected file does not match the interrupted upload ('" + session.filename + "'). Please select the exact file.");
         return;
@@ -839,7 +949,7 @@ function resumeSessionFile(event, uploadId) {
 }
 
 // ---------------------------------------------------------------------------
-// Chunked Uploader Implementation
+// Unified Chunked Uploader Implementation
 // ---------------------------------------------------------------------------
 class ChunkedUploader {
     constructor(file, existingUploadId = null) {
@@ -855,21 +965,21 @@ class ChunkedUploader {
         this.status = 'initializing'; // initializing, uploading, paused, assembling, completed, cancelled, error
         this.errorMessage = '';
         
-        // Concurrency token to guarantee ONE uploader = ONE active worker group
+        // Strict concurrency control: ONE uploader = ONE active worker group
         this.uploadGeneration = 0;
         this.isLoopRunning = false;
         this.isReconciling = false;
         
-        // Progress & Smoothed Speed tracking
+        // Progress & Smoothed Speed tracking (Exponential Moving Average)
         this.uploadedBytes = 0;
         this.lastSpeedCheck = Date.now();
         this.bytesSinceLastCheck = 0;
-        this.currentSpeed = 0; // Bytes/sec
+        this.currentSpeed = 0;
         
         // Abort controllers for all active chunk requests
         this.abortControllers = new Map();
         
-        // UI element ID
+        // Unique DOM card ID
         this.elementId = 'upload-' + (this.uploadId || 'temp-' + Math.random().toString(36).substr(2, 9));
     }
 
@@ -890,12 +1000,12 @@ class ChunkedUploader {
                     <div class="upload-meta">${formatBytes(this.totalSize)} • <span id="${this.elementId}-chunks">0/${this.totalChunks} chunks</span></div>
                 </div>
                 <div class="upload-actions">
-                    <span class="badge badge-uploading" id="${this.elementId}-badge">Uploading</span>
+                    <span class="badge badge-uploading" id="${this.elementId}-badge">UPLOADING</span>
                     <button class="btn btn-sm btn-secondary" id="${this.elementId}-pause-btn" onclick="togglePauseUpload('${this.elementId}')">Pause</button>
                     <button class="btn btn-sm btn-danger" id="${this.elementId}-cancel-btn" onclick="cancelUpload('${this.elementId}')">Cancel</button>
                 </div>
             </div>
-            <div class="progress-bar-container">
+            <div class="progress-bar-container" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="${this.elementId}-progress-container">
                 <div class="progress-bar-fill" id="${this.elementId}-fill" style="width: 0%"></div>
             </div>
             <div class="upload-stats">
@@ -911,6 +1021,7 @@ class ChunkedUploader {
 
         const badge = document.getElementById(`${this.elementId}-badge`);
         const fill = document.getElementById(`${this.elementId}-fill`);
+        const progressContainer = document.getElementById(`${this.elementId}-progress-container`);
         const progressText = document.getElementById(`${this.elementId}-progress-text`);
         const speedText = document.getElementById(`${this.elementId}-speed-text`);
         const chunksText = document.getElementById(`${this.elementId}-chunks`);
@@ -945,18 +1056,22 @@ class ChunkedUploader {
             if (this.status === 'completed') fill.classList.add('completed');
         }
 
+        if (progressContainer) {
+            progressContainer.setAttribute('aria-valuenow', percent);
+        }
+
         if (progressText) {
             progressText.textContent = `${percent}% • ${formatBytes(this.uploadedBytes)} / ${formatBytes(this.totalSize)}`;
         }
 
-        // Update ETA & Speed
+        // Update ETA & Speed text
         if (speedText) {
             if (this.status === 'uploading') {
                 const remainingBytes = Math.max(0, this.totalSize - this.uploadedBytes);
                 const etaSeconds = this.currentSpeed > 0 ? (remainingBytes / this.currentSpeed) : 0;
                 speedText.textContent = `${formatBytes(this.currentSpeed)}/s • ETA: ${formatTime(etaSeconds)}`;
             } else if (this.status === 'assembling') {
-                speedText.textContent = `Verifying & assembling final file...`;
+                speedText.textContent = `Verifying integrity & finalizing file...`;
             } else if (this.status === 'completed') {
                 speedText.textContent = `Upload verified and complete!`;
             } else if (this.status === 'cancelled') {
@@ -964,19 +1079,22 @@ class ChunkedUploader {
             } else if (this.status === 'paused') {
                 speedText.textContent = `Upload paused`;
             } else if (this.status === 'error') {
-                speedText.textContent = `Error: ${this.errorMessage}`;
+                speedText.textContent = `${this.errorMessage || 'Upload failed'}`;
             }
         }
 
-        // Update Badges & Buttons
+        // Update Status Badges & Buttons
         if (badge) {
             badge.className = `badge badge-${this.status}`;
             badge.textContent = this.status.toUpperCase();
         }
 
         if (pauseBtn) {
-            if (this.status === 'completed' || this.status === 'cancelled' || this.status === 'error' || this.status === 'assembling') {
+            if (this.status === 'completed' || this.status === 'cancelled' || this.status === 'assembling') {
                 pauseBtn.style.display = 'none';
+            } else if (this.status === 'error') {
+                pauseBtn.style.display = 'inline-block';
+                pauseBtn.textContent = 'Retry';
             } else {
                 pauseBtn.style.display = 'inline-block';
                 pauseBtn.textContent = (this.status === 'paused') ? 'Resume' : 'Pause';
@@ -998,7 +1116,7 @@ class ChunkedUploader {
         this.updateUI();
 
         try {
-            // Step 1: Start or Recover upload session
+            // Step 1: Initialize or Reconnect upload session
             if (!this.uploadId) {
                 const startRes = await fetch('/upload/start', {
                     method: 'POST',
@@ -1022,7 +1140,7 @@ class ChunkedUploader {
                 const statusRes = await fetch(`/upload/status/${this.uploadId}`);
                 if (!statusRes.ok) {
                     const errData = await statusRes.json().catch(() => ({}));
-                    throw new Error(errData.error || "Upload session expired or not found");
+                    throw new Error(errData.error || "Upload session expired or not found on server");
                 }
                 const statusData = await statusRes.json();
                 if (statusData.success) {
@@ -1034,7 +1152,7 @@ class ChunkedUploader {
                 }
             }
 
-            // Save to localStorage for recovery
+            // Save session to localStorage
             saveUploadSession(this.uploadId, {
                 upload_id: this.uploadId,
                 filename: this.filename,
@@ -1046,33 +1164,35 @@ class ChunkedUploader {
 
             this.updateUI();
 
-            // Step 2: Upload missing chunks concurrently
+            // Step 2: Upload missing chunks concurrently and await loop completion
             await this.uploadChunksLoop();
 
             if (this.status === 'cancelled' || this.status === 'paused') return;
 
             // Step 3: Complete upload
-            this.status = 'assembling';
-            this.updateUI();
+            if (this.receivedChunks.size >= this.totalChunks) {
+                this.status = 'assembling';
+                this.updateUI();
 
-            const completeRes = await fetch('/upload/complete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ upload_id: this.uploadId })
-            });
+                const completeRes = await fetch('/upload/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ upload_id: this.uploadId })
+                });
 
-            const completeData = await completeRes.json();
-            if (!completeData.success) {
-                throw new Error(completeData.error || "Failed to complete and verify upload");
+                const completeData = await completeRes.json();
+                if (!completeData.success) {
+                    throw new Error(completeData.error || "Failed to complete and verify upload");
+                }
+
+                this.status = 'completed';
+                removeUploadSession(this.uploadId);
+                this.updateUI();
+
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1200);
             }
-
-            this.status = 'completed';
-            removeUploadSession(this.uploadId);
-            this.updateUI();
-
-            setTimeout(() => {
-                window.location.reload();
-            }, 1200);
 
         } catch (err) {
             if (this.status === 'cancelled' || this.status === 'paused') return;
@@ -1084,12 +1204,15 @@ class ChunkedUploader {
     }
 
     /**
-     * Reconciles authoritative server chunk state and safely resumes missing chunks.
-     * Invoked on network reconnection ('online') or tab activation ('visibilitychange').
+     * UNIFIED RECOVERY PIPELINE:
+     * Authoritative single path for network reconnect, visibility change, and manual user resume.
      */
-    async reconcileAndResume() {
+    async reconcileAndResume(isUserResume = false) {
         if (!this.uploadId || this.isReconciling) return;
         if (this.status === 'completed' || this.status === 'cancelled' || this.status === 'assembling') return;
+        
+        // Strict pause preservation: Automatic background events will NEVER unpause a manually paused upload!
+        if (this.status === 'paused' && !isUserResume) return;
 
         this.isReconciling = true;
         try {
@@ -1097,7 +1220,7 @@ class ChunkedUploader {
             if (!statusRes.ok) {
                 const errData = await statusRes.json().catch(() => ({}));
                 this.status = 'error';
-                this.errorMessage = errData.error || "Upload session expired or was cancelled on server";
+                this.errorMessage = errData.error || "Upload session expired or not found on server";
                 removeUploadSession(this.uploadId);
                 this.updateUI();
                 return;
@@ -1112,7 +1235,7 @@ class ChunkedUploader {
                 return;
             }
 
-            // Update authoritative server state
+            // Treat server as authoritative
             this.receivedChunks = new Set(statusData.received_chunks);
             this.chunkSize = statusData.chunk_size;
             this.totalChunks = statusData.total_chunks;
@@ -1127,10 +1250,11 @@ class ChunkedUploader {
                 this.status = 'completed';
                 removeUploadSession(this.uploadId);
                 this.updateUI();
+                setTimeout(() => location.reload(), 1200);
                 return;
             }
 
-            // Check if all chunks received
+            // Check if all chunks already uploaded
             if (this.receivedChunks.size >= this.totalChunks) {
                 this.status = 'assembling';
                 this.updateUI();
@@ -1153,20 +1277,48 @@ class ChunkedUploader {
                 return;
             }
 
-            // If user has not explicitly paused, resume transmission
-            if (this.status !== 'paused') {
+            // Upload missing chunks
+            if (isUserResume || this.status !== 'paused') {
                 this.status = 'uploading';
                 this.errorMessage = '';
                 this.lastSpeedCheck = Date.now();
                 this.bytesSinceLastCheck = 0;
                 this.updateUI();
-                this.uploadChunksLoop();
+                
+                // Properly await uploadChunksLoop to guarantee unified execution
+                await this.uploadChunksLoop();
+
+                if (this.status === 'uploading' && this.receivedChunks.size >= this.totalChunks) {
+                    this.status = 'assembling';
+                    this.updateUI();
+                    const completeRes = await fetch('/upload/complete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ upload_id: this.uploadId })
+                    });
+                    const completeData = await completeRes.json();
+                    if (completeData.success) {
+                        this.status = 'completed';
+                        removeUploadSession(this.uploadId);
+                        this.updateUI();
+                        setTimeout(() => location.reload(), 1200);
+                    } else {
+                        this.status = 'error';
+                        this.errorMessage = completeData.error || "Assembly failed";
+                        this.updateUI();
+                    }
+                }
             } else {
                 this.updateUI();
             }
 
         } catch (err) {
             console.warn("Reconciliation network error:", err);
+            if (isUserResume) {
+                this.status = 'error';
+                this.errorMessage = "Network reconnection failed. Please retry.";
+                this.updateUI();
+            }
         } finally {
             this.isReconciling = false;
         }
@@ -1284,7 +1436,7 @@ class ChunkedUploader {
         this.uploadGeneration++;
         this.isLoopRunning = false;
 
-        // Abort in-flight requests
+        // Abort in-flight fetch requests immediately
         for (let controller of this.abortControllers.values()) {
             controller.abort();
         }
@@ -1293,51 +1445,8 @@ class ChunkedUploader {
     }
 
     resume() {
-        if (this.status !== 'paused' && this.status !== 'error') return;
-        this.status = 'uploading';
-        this.errorMessage = '';
-        this.lastSpeedCheck = Date.now();
-        this.bytesSinceLastCheck = 0;
-        this.updateUI();
-
-        // Query server to get actual missing chunks
-        fetch(`/upload/status/${this.uploadId}`).then(res => {
-            if (!res.ok) {
-                return res.json().then(e => { throw new Error(e.error || "Upload expired or not found on server"); });
-            }
-            return res.json();
-        }).then(statusData => {
-            if (this.status !== 'uploading') return;
-            if (statusData.success) {
-                this.receivedChunks = new Set(statusData.received_chunks);
-            }
-            return this.uploadChunksLoop();
-        }).then(async () => {
-            if (this.status !== 'uploading') return;
-            this.status = 'assembling';
-            this.updateUI();
-
-            const completeRes = await fetch('/upload/complete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ upload_id: this.uploadId })
-            });
-
-            const completeData = await completeRes.json();
-            if (!completeData.success) {
-                throw new Error(completeData.error || "Failed to complete upload");
-            }
-
-            this.status = 'completed';
-            removeUploadSession(this.uploadId);
-            this.updateUI();
-            setTimeout(() => location.reload(), 1200);
-        }).catch(err => {
-            if (this.status === 'cancelled' || this.status === 'paused') return;
-            this.status = 'error';
-            this.errorMessage = err.message || "Resume failed";
-            this.updateUI();
-        });
+        // Delegates directly to unified recovery pipeline with isUserResume = true
+        return this.reconcileAndResume(true);
     }
 
     async cancel() {
@@ -1394,7 +1503,7 @@ function cancelUpload(elementId) {
 function togglePauseUpload(elementId) {
     const uploader = activeUploaders.get(elementId);
     if (uploader) {
-        if (uploader.status === 'paused') {
+        if (uploader.status === 'paused' || uploader.status === 'error') {
             uploader.resume();
         } else {
             uploader.pause();
@@ -1451,7 +1560,7 @@ function filterFiles() {
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
         activeUploaders.forEach(uploader => {
-            uploader.reconcileAndResume();
+            uploader.reconcileAndResume(false);
         });
     }
 });
@@ -1459,7 +1568,7 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('online', () => {
     console.info("Network online detected: reconciling active uploads");
     activeUploaders.forEach(uploader => {
-        uploader.reconcileAndResume();
+        uploader.reconcileAndResume(false);
     });
 });
 
