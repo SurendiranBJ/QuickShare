@@ -30,8 +30,8 @@ logger = logging.getLogger("QuickShare")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
-DEFAULT_CHUNK_SIZE = int(os.getenv("DEFAULT_CHUNK_SIZE", 5 * 1024 * 1024))  # 5 MB
-UPLOAD_CACHE_TIMEOUT = int(os.getenv("UPLOAD_CACHE_TIMEOUT", 21600))        # 6 hours (configurable via env)
+DEFAULT_CHUNK_SIZE = int(os.getenv("DEFAULT_CHUNK_SIZE", 5 * 1024 * 1024))  # 5 MB default
+UPLOAD_CACHE_TIMEOUT = int(os.getenv("UPLOAD_CACHE_TIMEOUT", 21600))        # 6 hours default (configurable via env)
 CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", 1800))                 # Check expired cache every 30 mins
 UUID_REGEX = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', re.IGNORECASE)
 
@@ -47,7 +47,10 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 # Per-Upload Fine-Grained Locking Manager
 # -----------------------------------------------------------------------------
 class UploadLockManager:
-    """Provides thread-safe per-upload locks without global contention or memory leaks."""
+    """
+    Provides thread-safe per-upload locks without global contention or memory leaks.
+    Each upload_id has an isolated mutex with reference counting.
+    """
     def __init__(self):
         self._guard = threading.Lock()
         self._locks = {}  # upload_id -> [Lock, ref_count]
@@ -208,7 +211,10 @@ def save_metadata(upload_id, metadata):
         return False
 
 def clean_expired_cache():
-    """Scans cache directory and cleans up abandoned uploads safely with lock."""
+    """
+    Scans cache directory and cleans up abandoned uploads safely with lock.
+    Assembling uploads are strictly protected from ordinary cleanup to prevent deleting active multi-GB assembly.
+    """
     if not os.path.exists(CACHE_DIR):
         return
     now = time.time()
@@ -822,7 +828,7 @@ function resumeSessionFile(event, uploadId) {
     const session = sessions[uploadId];
     if (!session) return;
 
-    // Strict identity check: name, size, and lastModified
+    // Multi-factor identity check: name, size, and lastModified
     if (file.name !== session.filename || file.size !== session.total_size || (session.last_modified && file.lastModified !== session.last_modified)) {
         alert("The selected file does not match the interrupted upload ('" + session.filename + "'). Please select the exact file.");
         return;
@@ -849,9 +855,10 @@ class ChunkedUploader {
         this.status = 'initializing'; // initializing, uploading, paused, assembling, completed, cancelled, error
         this.errorMessage = '';
         
-        // Loop generation counter to prevent duplicate concurrent loops
+        // Concurrency token to guarantee ONE uploader = ONE active worker group
         this.uploadGeneration = 0;
         this.isLoopRunning = false;
+        this.isReconciling = false;
         
         // Progress & Smoothed Speed tracking
         this.uploadedBytes = 0;
@@ -914,7 +921,7 @@ class ChunkedUploader {
             chunksText.textContent = `${this.receivedChunks.size}/${this.totalChunks} chunks`;
         }
 
-        // Calculate progress percentage based on confirmed chunks
+        // Calculate progress percentage based strictly on confirmed chunks
         let percent = 0;
         if (this.totalSize > 0) {
             let confirmedBytes = 0;
@@ -1063,7 +1070,6 @@ class ChunkedUploader {
             removeUploadSession(this.uploadId);
             this.updateUI();
 
-            // Refresh file list after 1.2 seconds
             setTimeout(() => {
                 window.location.reload();
             }, 1200);
@@ -1074,6 +1080,95 @@ class ChunkedUploader {
             this.status = 'error';
             this.errorMessage = err.message || "Network error occurred";
             this.updateUI();
+        }
+    }
+
+    /**
+     * Reconciles authoritative server chunk state and safely resumes missing chunks.
+     * Invoked on network reconnection ('online') or tab activation ('visibilitychange').
+     */
+    async reconcileAndResume() {
+        if (!this.uploadId || this.isReconciling) return;
+        if (this.status === 'completed' || this.status === 'cancelled' || this.status === 'assembling') return;
+
+        this.isReconciling = true;
+        try {
+            const statusRes = await fetch(`/upload/status/${this.uploadId}`);
+            if (!statusRes.ok) {
+                const errData = await statusRes.json().catch(() => ({}));
+                this.status = 'error';
+                this.errorMessage = errData.error || "Upload session expired or was cancelled on server";
+                removeUploadSession(this.uploadId);
+                this.updateUI();
+                return;
+            }
+
+            const statusData = await statusRes.json();
+            if (!statusData.success) {
+                this.status = 'error';
+                this.errorMessage = statusData.error || "Upload session not found";
+                removeUploadSession(this.uploadId);
+                this.updateUI();
+                return;
+            }
+
+            // Update authoritative server state
+            this.receivedChunks = new Set(statusData.received_chunks);
+            this.chunkSize = statusData.chunk_size;
+            this.totalChunks = statusData.total_chunks;
+
+            if (statusData.status === 'assembling') {
+                this.status = 'assembling';
+                this.updateUI();
+                return;
+            }
+
+            if (statusData.status === 'completed') {
+                this.status = 'completed';
+                removeUploadSession(this.uploadId);
+                this.updateUI();
+                return;
+            }
+
+            // Check if all chunks received
+            if (this.receivedChunks.size >= this.totalChunks) {
+                this.status = 'assembling';
+                this.updateUI();
+                const completeRes = await fetch('/upload/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ upload_id: this.uploadId })
+                });
+                const completeData = await completeRes.json();
+                if (completeData.success) {
+                    this.status = 'completed';
+                    removeUploadSession(this.uploadId);
+                    this.updateUI();
+                    setTimeout(() => location.reload(), 1200);
+                } else {
+                    this.status = 'error';
+                    this.errorMessage = completeData.error || "Assembly failed";
+                    this.updateUI();
+                }
+                return;
+            }
+
+            // If user has not explicitly paused, resume transmission
+            if (this.status !== 'paused') {
+                this.status = 'uploading';
+                this.errorMessage = '';
+                this.lastSpeedCheck = Date.now();
+                this.bytesSinceLastCheck = 0;
+                this.updateUI();
+                this.uploadChunksLoop();
+            } else {
+                this.updateUI();
+            }
+
+        } catch (err) {
+            console.warn("Reconciliation network error:", err);
+        } finally {
+            this.isReconciling = false;
         }
     }
 
@@ -1356,12 +1451,7 @@ function filterFiles() {
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
         activeUploaders.forEach(uploader => {
-            if (uploader.status === 'uploading' && !uploader.isLoopRunning) {
-                // Resume loop safely if workers were suspended by browser throttling
-                uploader.uploadChunksLoop();
-            } else if (uploader.status === 'uploading') {
-                uploader.updateUI();
-            }
+            uploader.reconcileAndResume();
         });
     }
 });
@@ -1369,9 +1459,7 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('online', () => {
     console.info("Network online detected: reconciling active uploads");
     activeUploaders.forEach(uploader => {
-        if (uploader.status === 'uploading' || uploader.status === 'error') {
-            uploader.resume();
-        }
+        uploader.reconcileAndResume();
     });
 });
 
@@ -1743,7 +1831,10 @@ def upload_complete():
         latest_meta["status"] = "completed"
         latest_meta["safe_filename"] = final_filename
         latest_meta["updated_at"] = time.time()
-        save_metadata(upload_id, latest_meta)
+        
+        # Safe final metadata write: even if saving ephemeral cache metadata fails, the finalized file is kept!
+        if not save_metadata(upload_id, latest_meta):
+            logger.warning(f"Final metadata persistence failed for upload_id={upload_id}, but file was safely finalized to '{final_filename}'")
 
         shutil.rmtree(cache_dir, ignore_errors=True)
 
