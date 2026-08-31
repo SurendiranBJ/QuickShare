@@ -477,14 +477,14 @@ if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
     cleanup_thread.start()
 
 # -----------------------------------------------------------------------------
-# Frontend HTML / UI Template (Restored QR, File-Type Icons & Search)
+# Frontend HTML / UI Template (True Mobile-First Responsive Layout)
 # -----------------------------------------------------------------------------
 UPLOAD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
     <title>QuickShare — Local Network File Transfer</title>
     <style>
         :root {
@@ -512,7 +512,7 @@ UPLOAD_HTML = """
             --transition-smooth: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        * {
+        *, *::before, *::after {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
@@ -520,14 +520,18 @@ UPLOAD_HTML = """
             -webkit-tap-highlight-color: transparent;
         }
 
-        body {
+        html, body {
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
             background-color: var(--bg-canvas);
             color: var(--text-primary);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
-            overflow-x: hidden;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
@@ -536,7 +540,7 @@ UPLOAD_HTML = """
         .app-nav {
             width: 100%;
             border-bottom: 1px solid var(--border-subtle);
-            background-color: rgba(9, 10, 15, 0.85);
+            background-color: rgba(9, 10, 15, 0.9);
             backdrop-filter: blur(12px);
             position: sticky;
             top: 0;
@@ -544,21 +548,24 @@ UPLOAD_HTML = """
         }
 
         .nav-inner {
-            max-width: 820px;
+            width: 100%;
+            max-width: 860px;
             margin: 0 auto;
-            padding: 0.85rem 1.25rem;
+            padding: 0.75rem 1rem;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 1rem;
+            gap: 0.75rem;
+            flex-wrap: wrap;
         }
 
         .brand-group {
             display: flex;
             align-items: center;
-            gap: 0.65rem;
+            gap: 0.55rem;
             text-decoration: none;
             color: var(--text-primary);
+            flex-shrink: 0;
         }
 
         .brand-icon {
@@ -575,13 +582,13 @@ UPLOAD_HTML = """
         }
 
         .brand-badge {
-            font-size: 0.68rem;
+            font-size: 0.65rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.06em;
             background: var(--bg-surface-elevated);
             color: var(--text-tertiary);
-            padding: 0.15rem 0.45rem;
+            padding: 0.15rem 0.4rem;
             border-radius: var(--radius-sm);
             border: 1px solid var(--border-subtle);
         }
@@ -589,22 +596,24 @@ UPLOAD_HTML = """
         .nav-actions {
             display: flex;
             align-items: center;
-            gap: 0.55rem;
+            gap: 0.5rem;
+            flex-wrap: wrap;
         }
 
         .lan-pill-btn {
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-sm);
-            padding: 0.4rem 0.75rem;
+            padding: 0.38rem 0.65rem;
             display: inline-flex;
             align-items: center;
-            gap: 0.55rem;
+            gap: 0.45rem;
             color: var(--text-secondary);
-            font-size: 0.82rem;
+            font-size: 0.78rem;
             font-weight: 500;
             cursor: pointer;
             transition: var(--transition-smooth);
+            text-decoration: none;
         }
 
         .lan-pill-btn:hover, .lan-pill-btn:focus-visible {
@@ -625,18 +634,19 @@ UPLOAD_HTML = """
 
         .lan-ip-text {
             font-family: var(--font-mono);
-            font-size: 0.8rem;
+            font-size: 0.78rem;
             color: var(--text-primary);
         }
 
         /* Main Workspace Container */
         .workspace {
             width: 100%;
-            max-width: 820px;
-            padding: 2.25rem 1.25rem 4rem;
+            max-width: 860px;
+            padding: 1.75rem 1rem 4rem;
             display: flex;
             flex-direction: column;
-            gap: 2.5rem;
+            gap: 2rem;
+            margin: 0 auto;
         }
 
         /* Section Titles */
@@ -644,13 +654,13 @@ UPLOAD_HTML = """
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 0.85rem;
+            margin-bottom: 0.75rem;
             gap: 0.5rem;
             flex-wrap: wrap;
         }
 
         .section-title {
-            font-size: 0.8rem;
+            font-size: 0.78rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.06em;
@@ -665,17 +675,18 @@ UPLOAD_HTML = """
 
         /* Dropzone Component */
         .dropzone-container {
+            width: 100%;
             border: 1px dashed var(--border-strong);
             border-radius: var(--radius-lg);
             background: var(--bg-surface);
-            padding: 3rem 1.5rem;
+            padding: 2.75rem 1.25rem;
             text-align: center;
             cursor: pointer;
             transition: var(--transition-smooth);
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 1.15rem;
+            gap: 1rem;
         }
 
         .dropzone-container:hover, .dropzone-container.dragover, .dropzone-container:focus-visible {
@@ -716,18 +727,12 @@ UPLOAD_HTML = """
         }
 
         .dropzone-subtitle {
-            font-size: 0.85rem;
+            font-size: 0.82rem;
             color: var(--text-secondary);
         }
 
         .desktop-text { display: inline; }
         .mobile-text { display: none; }
-
-        @media (max-width: 640px) {
-            .desktop-text { display: none; }
-            .mobile-text { display: inline; }
-            .dropzone-container { padding: 2.25rem 1.25rem; }
-        }
 
         .file-input { display: none; }
 
@@ -737,7 +742,7 @@ UPLOAD_HTML = """
             color: var(--text-primary);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-sm);
-            padding: 0.45rem 0.85rem;
+            padding: 0.42rem 0.8rem;
             font-size: 0.82rem;
             font-weight: 500;
             cursor: pointer;
@@ -747,7 +752,8 @@ UPLOAD_HTML = """
             justify-content: center;
             gap: 0.45rem;
             text-decoration: none;
-            min-height: 34px;
+            min-height: 36px;
+            white-space: nowrap;
         }
 
         .btn:hover, .btn:focus-visible {
@@ -780,8 +786,8 @@ UPLOAD_HTML = """
         }
 
         .btn-sm {
-            padding: 0.35rem 0.7rem;
-            font-size: 0.8rem;
+            padding: 0.35rem 0.65rem;
+            font-size: 0.78rem;
             min-height: 32px;
         }
 
@@ -809,16 +815,18 @@ UPLOAD_HTML = """
             display: flex;
             flex-direction: column;
             gap: 0.75rem;
+            width: 100%;
         }
 
         .transfer-card {
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
-            padding: 1.15rem;
+            padding: 1.1rem;
             display: flex;
             flex-direction: column;
-            gap: 0.85rem;
+            gap: 0.8rem;
+            width: 100%;
             transition: var(--transition-smooth);
         }
 
@@ -826,7 +834,8 @@ UPLOAD_HTML = """
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            gap: 1rem;
+            gap: 0.75rem;
+            flex-wrap: wrap;
         }
 
         .transfer-title-group {
@@ -834,19 +843,20 @@ UPLOAD_HTML = """
             flex-direction: column;
             gap: 0.2rem;
             min-width: 0;
-            flex: 1;
+            flex: 1 1 200px;
         }
 
         .transfer-filename {
-            font-size: 0.92rem;
+            font-size: 0.9rem;
             font-weight: 600;
             color: var(--text-primary);
-            word-break: break-all;
-            line-height: 1.3;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            line-height: 1.35;
         }
 
         .transfer-meta {
-            font-size: 0.78rem;
+            font-size: 0.76rem;
             color: var(--text-secondary);
             font-family: var(--font-mono);
         }
@@ -860,9 +870,9 @@ UPLOAD_HTML = """
 
         /* Semantic Badges */
         .status-badge {
-            font-size: 0.72rem;
+            font-size: 0.7rem;
             font-weight: 600;
-            padding: 0.2rem 0.5rem;
+            padding: 0.18rem 0.45rem;
             border-radius: var(--radius-sm);
             letter-spacing: 0.04em;
             text-transform: uppercase;
@@ -904,7 +914,7 @@ UPLOAD_HTML = """
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 0.78rem;
+            font-size: 0.76rem;
             color: var(--text-secondary);
             font-family: var(--font-mono);
             flex-wrap: wrap;
@@ -913,23 +923,24 @@ UPLOAD_HTML = """
 
         /* Interrupted Session Notification */
         .session-resume-alert {
+            width: 100%;
             background: var(--bg-surface);
             border: 1px solid rgba(245, 158, 11, 0.3);
             border-radius: var(--radius-md);
-            padding: 0.95rem 1.15rem;
+            padding: 0.85rem 1rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            gap: 1rem;
-            margin-bottom: 1.25rem;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
             flex-wrap: wrap;
         }
 
         .session-resume-text {
-            font-size: 0.85rem;
+            font-size: 0.82rem;
             color: var(--text-primary);
             line-height: 1.4;
-            flex: 1 1 280px;
+            flex: 1 1 240px;
         }
 
         .session-resume-actions {
@@ -940,6 +951,7 @@ UPLOAD_HTML = """
 
         /* Available Files Section & Professional File Icon System */
         .files-container {
+            width: 100%;
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
@@ -947,6 +959,7 @@ UPLOAD_HTML = """
         }
 
         .files-toolbar {
+            width: 100%;
             padding: 0.75rem 1rem;
             border-bottom: 1px solid var(--border-subtle);
             display: flex;
@@ -961,7 +974,7 @@ UPLOAD_HTML = """
             display: flex;
             align-items: center;
             width: 100%;
-            max-width: 280px;
+            max-width: 320px;
         }
 
         .search-icon {
@@ -978,7 +991,7 @@ UPLOAD_HTML = """
             background: var(--bg-surface-elevated);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-sm);
-            padding: 0.4rem 0.65rem 0.4rem 2rem;
+            padding: 0.45rem 0.65rem 0.45rem 2.1rem;
             color: var(--text-primary);
             font-size: 0.82rem;
             outline: none;
@@ -994,7 +1007,6 @@ UPLOAD_HTML = """
             width: 100%;
             border-collapse: collapse;
             font-size: 0.85rem;
-            table-layout: fixed;
         }
 
         .file-table th {
@@ -1074,24 +1086,22 @@ UPLOAD_HTML = """
             flex-direction: column;
             gap: 0.15rem;
             min-width: 0;
-            overflow: hidden;
+            flex: 1;
         }
 
         .file-name-text {
             font-size: 0.88rem;
             font-weight: 600;
             color: var(--text-primary);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            line-height: 1.35;
         }
 
         .file-type-subtext {
             font-size: 0.76rem;
             color: var(--text-tertiary);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            line-height: 1.3;
         }
 
         .file-size-cell {
@@ -1108,12 +1118,12 @@ UPLOAD_HTML = """
         }
 
         .empty-state {
-            padding: 3.5rem 1.5rem;
+            padding: 3rem 1.25rem;
             text-align: center;
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 0.4rem;
+            gap: 0.35rem;
         }
 
         .empty-state-title {
@@ -1145,7 +1155,7 @@ UPLOAD_HTML = """
             border: 1px solid var(--border-strong);
             border-radius: var(--radius-lg);
             padding: 1.5rem;
-            max-width: 380px;
+            max-width: min(100% - 1.5rem, 380px);
             width: 100%;
             display: flex;
             flex-direction: column;
@@ -1183,6 +1193,7 @@ UPLOAD_HTML = """
             justify-content: center;
             width: 210px;
             height: 210px;
+            max-width: 100%;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
 
@@ -1221,11 +1232,17 @@ UPLOAD_HTML = """
             position: fixed;
             bottom: 1.5rem;
             right: 1.5rem;
+            left: 1.5rem;
             z-index: 90;
             display: flex;
             flex-direction: column;
+            align-items: center;
             gap: 0.5rem;
             pointer-events: none;
+        }
+
+        @media (min-width: 641px) {
+            .toast-container { left: auto; align-items: flex-end; }
         }
 
         .toast {
@@ -1240,6 +1257,7 @@ UPLOAD_HTML = """
             align-items: center;
             gap: 0.5rem;
             animation: toastIn 0.2s ease-out;
+            max-width: 100%;
         }
 
         @keyframes toastIn {
@@ -1247,47 +1265,94 @@ UPLOAD_HTML = """
             to { opacity: 1; transform: translateY(0); }
         }
 
-        /* Mobile Responsive Adjustments */
+        /* -----------------------------------------------------------------
+           MOBILE-FIRST PURPOSE-BUILT RESPONSIVE LAYOUT (< 640px)
+        ----------------------------------------------------------------- */
         @media (max-width: 640px) {
-            .workspace { padding: 1.5rem 1rem 3rem; gap: 2rem; }
-            .btn { min-height: 40px; }
-            .btn-sm { min-height: 36px; }
-            
-            .search-box { max-width: 100%; }
-
-            .file-icon-box { width: 34px; height: 34px; }
-            .file-icon-box svg { width: 16px; height: 16px; }
-
-            .file-table, .file-table thead, .file-table tbody, .file-table th, .file-table td, .file-table tr {
-                display: block;
+            .workspace {
+                padding: 1.25rem 0.85rem 3rem;
+                gap: 1.75rem;
             }
 
-            .file-table thead { display: none; }
+            .desktop-text { display: none; }
+            .mobile-text { display: inline; }
+
+            .dropzone-container {
+                padding: 2rem 1rem;
+                min-height: 180px;
+            }
+
+            .search-box {
+                max-width: 100%;
+            }
+
+            .btn {
+                min-height: 40px;
+                padding: 0.45rem 0.85rem;
+            }
+
+            .btn-sm {
+                min-height: 36px;
+                padding: 0.38rem 0.75rem;
+            }
+
+            .file-icon-box {
+                width: 36px;
+                height: 36px;
+            }
+
+            .file-icon-box svg {
+                width: 17px;
+                height: 17px;
+            }
+
+            /* Responsive Table-to-Card transformation */
+            .file-table, .file-table tbody, .file-table tr, .file-table td {
+                display: block;
+                width: 100%;
+            }
+
+            .file-table thead {
+                display: none;
+            }
 
             .file-table tr {
                 border-bottom: 1px solid var(--border-subtle);
-                padding: 0.9rem 1rem;
+                padding: 0.9rem 0.85rem;
+                display: flex;
+                flex-direction: column;
+                gap: 0.65rem;
             }
 
             .file-table td {
-                padding: 0.2rem 0;
+                padding: 0;
                 border: none;
             }
 
-            .desktop-only-col { display: none; }
-
-            .file-name-text {
-                white-space: normal;
-                word-break: break-all;
+            .desktop-only-col {
+                display: none !important;
             }
 
             .file-table td:last-child {
-                margin-top: 0.6rem;
-                padding-top: 0.4rem;
+                width: 100%;
             }
 
             .file-table td:last-child .btn {
                 width: 100%;
+            }
+
+            .nav-actions {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .nav-actions .btn {
+                flex: 1 1 auto;
+            }
+
+            .lan-pill-btn {
+                width: 100%;
+                justify-content: center;
             }
         }
 
@@ -1338,7 +1403,7 @@ UPLOAD_HTML = """
     <div id="resumeContainer" aria-live="polite"></div>
 
     <!-- Upload Section -->
-    <section aria-labelledby="uploadSectionHeading">
+    <section aria-labelledby="uploadSectionHeading" style="width: 100%;">
         <div class="section-header">
             <h2 class="section-title" id="uploadSectionHeading">Share Files</h2>
         </div>
@@ -1364,7 +1429,7 @@ UPLOAD_HTML = """
     </section>
 
     <!-- Available Files Section -->
-    <section aria-labelledby="filesSectionHeading">
+    <section aria-labelledby="filesSectionHeading" style="width: 100%;">
         <div class="section-header">
             <h2 class="section-title" id="filesSectionHeading">Available Files (<span id="fileCount">{{ files|length }}</span>)</h2>
             <div class="section-actions">
@@ -1395,10 +1460,10 @@ UPLOAD_HTML = """
             <table class="file-table" id="fileTable">
                 <thead>
                     <tr>
-                        <th scope="col" style="width: 55%;">Name</th>
-                        <th scope="col" class="desktop-only-col" style="width: 15%;">Size</th>
-                        <th scope="col" class="desktop-only-col" style="width: 15%;">Added</th>
-                        <th scope="col" style="width: 15%; text-align: right;">Action</th>
+                        <th scope="col">Name</th>
+                        <th scope="col" class="desktop-only-col" style="width: 100px;">Size</th>
+                        <th scope="col" class="desktop-only-col" style="width: 120px;">Added</th>
+                        <th scope="col" style="width: 120px; text-align: right;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1437,7 +1502,7 @@ UPLOAD_HTML = """
                                 </div>
                                 <div class="file-title-group">
                                     <span class="file-name-text" title="{{ f.name }}">{{ f.name }}</span>
-                                    <span class="file-type-subtext">{{ f.type_info.label }} · {{ f.size_str }}</span>
+                                    <span class="file-type-subtext">{{ f.type_info.label }} · {{ f.size_str }} · {{ f.mtime_str }}</span>
                                 </div>
                             </div>
                         </td>
