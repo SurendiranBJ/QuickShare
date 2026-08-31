@@ -1,5 +1,6 @@
 import os
 import sys
+import io
 import time
 import uuid
 import json
@@ -7,11 +8,12 @@ import shutil
 import hashlib
 import re
 import math
+import socket
 import logging
 import threading
 from contextlib import contextmanager
 from datetime import datetime
-from flask import Flask, request, send_from_directory, render_template_string, jsonify, abort
+from flask import Flask, request, send_from_directory, render_template_string, jsonify, abort, Response
 from werkzeug.utils import secure_filename
 
 # -----------------------------------------------------------------------------
@@ -25,17 +27,22 @@ logging.basicConfig(
 logger = logging.getLogger("QuickShare")
 
 # -----------------------------------------------------------------------------
-# Configuration Constants
+# Configuration Constants (Configurable via Environment Variables)
 # -----------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
+
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", 5000))
+DEBUG = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+
 DEFAULT_CHUNK_SIZE = int(os.getenv("DEFAULT_CHUNK_SIZE", 5 * 1024 * 1024))  # 5 MB default
-UPLOAD_CACHE_TIMEOUT = int(os.getenv("UPLOAD_CACHE_TIMEOUT", 21600))        # 6 hours default (configurable via env)
-CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", 1800))                 # Check expired cache every 30 mins
+UPLOAD_CACHE_TIMEOUT = int(os.getenv("UPLOAD_CACHE_TIMEOUT", 21600))        # 6 hours default
+CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", 1800))                 # 30 mins scan interval
 UUID_REGEX = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', re.IGNORECASE)
 
-# Ensure directories exist
+# Ensure required directories exist
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -88,8 +95,50 @@ class UploadLockManager:
 upload_lock_manager = UploadLockManager()
 
 # -----------------------------------------------------------------------------
-# Helper Functions
+# Helper Functions & LAN IP Discovery
 # -----------------------------------------------------------------------------
+def get_lan_ip():
+    """Dynamically detects the primary LAN IP address of this machine."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        # Connect to a public DNS IP (no packet is actually transmitted over the wire)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            _, _, ips = socket.gethostbyname_ex(socket.gethostname())
+            for ip in ips:
+                if not ip.startswith('127.'):
+                    return ip
+            return '127.0.0.1'
+        except Exception:
+            return '127.0.0.1'
+
+def generate_qr_svg(url):
+    """Generates an SVG QR code string without requiring heavy imaging dependencies."""
+    try:
+        import qrcode
+        import qrcode.image.svg
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=2,
+            image_factory=qrcode.image.svg.SvgPathImage
+        )
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color='black', back_color='white')
+        out = io.BytesIO()
+        img.save(out)
+        return out.getvalue().decode('utf-8')
+    except Exception as e:
+        logger.warning(f"QR code generation failed or qrcode package unavailable: {e}")
+        return None
+
 def format_bytes(size_bytes):
     """Format bytes into a human readable string (KB, MB, GB, etc.)."""
     if size_bytes is None or size_bytes < 0:
@@ -270,13 +319,13 @@ def cache_cleanup_worker():
 # Run initial cleanup on startup
 clean_expired_cache()
 
-# Start background cleanup thread safely with Flask debug reloader
+# Start background cleanup thread safely
 if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
     cleanup_thread = threading.Thread(target=cache_cleanup_worker, daemon=True, name="CacheCleanupWorker")
     cleanup_thread.start()
 
 # -----------------------------------------------------------------------------
-# Frontend HTML / UI Template (Fully Responsive & Accessible)
+# Frontend HTML / UI Template (Mobile-First, Responsive & Accessible)
 # -----------------------------------------------------------------------------
 UPLOAD_HTML = """
 <!DOCTYPE html>
@@ -284,7 +333,7 @@ UPLOAD_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-    <title>QuickShare — Fast, Secure & Resumable File Transfers</title>
+    <title>QuickShare — Fast & Resumable LAN File Transfers</title>
     <style>
         :root {
             --bg-color: #0b0f19;
@@ -333,7 +382,7 @@ UPLOAD_HTML = """
             margin-inline: auto;
             display: flex;
             flex-direction: column;
-            gap: 1.75rem;
+            gap: 1.5rem;
         }
 
         /* Header */
@@ -362,18 +411,74 @@ UPLOAD_HTML = """
             background-color: var(--surface-card);
             border: 1px solid var(--card-border);
             border-radius: var(--border-radius);
-            padding: clamp(1.2rem, 3vw, 1.85rem);
+            padding: clamp(1.15rem, 3vw, 1.75rem);
             box-shadow: 0 12px 30px -8px rgba(0, 0, 0, 0.45);
         }
 
         .card-title {
-            font-size: clamp(1.1rem, 3vw, 1.3rem);
+            font-size: clamp(1.05rem, 2.8vw, 1.25rem);
             font-weight: 700;
-            margin-bottom: 1.25rem;
+            margin-bottom: 1.15rem;
             display: flex;
             align-items: center;
             justify-content: space-between;
             color: var(--text-primary);
+        }
+
+        /* LAN Status Card */
+        .lan-card {
+            background: linear-gradient(135deg, rgba(21, 30, 46, 0.9) 0%, rgba(30, 41, 59, 0.6) 100%);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .lan-info {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            flex: 1 1 280px;
+        }
+
+        .lan-indicator {
+            width: 12px;
+            height: 12px;
+            background-color: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--success);
+            flex-shrink: 0;
+        }
+
+        .lan-details {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+
+        .lan-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--success);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .lan-url {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: clamp(0.95rem, 2.8vw, 1.1rem);
+            font-weight: 600;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+
+        .lan-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
         }
 
         /* Dropzone */
@@ -609,6 +714,50 @@ UPLOAD_HTML = """
             flex-wrap: wrap;
         }
 
+        /* QR Code Modal */
+        .qr-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 1rem;
+        }
+
+        .qr-modal-card {
+            background: var(--surface-card);
+            border: 1px solid var(--card-border);
+            border-radius: var(--border-radius);
+            padding: 1.75rem;
+            max-width: 380px;
+            width: 100%;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.25rem;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        .qr-image-container {
+            background: #ffffff;
+            padding: 1rem;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            max-width: 240px;
+            width: 100%;
+            aspect-ratio: 1;
+        }
+
+        .qr-image-container svg {
+            width: 100%;
+            height: 100%;
+        }
+
         /* File List & Responsive Table-to-Card */
         .file-list-header {
             display: flex;
@@ -677,9 +826,7 @@ UPLOAD_HTML = """
             font-size: 0.95rem;
         }
 
-        /* -------------------------------------------------------------------------
-         * Mobile Layout Responsive Overrides
-         * ------------------------------------------------------------------------- */
+        /* Mobile Layout Overrides */
         @media (max-width: 640px) {
             .btn {
                 min-height: 44px;
@@ -692,6 +839,14 @@ UPLOAD_HTML = """
                 font-size: 0.9rem;
             }
 
+            .lan-actions {
+                width: 100%;
+            }
+
+            .lan-actions .btn {
+                flex: 1 1 120px;
+            }
+
             .upload-actions {
                 width: 100%;
                 justify-content: flex-start;
@@ -702,7 +857,6 @@ UPLOAD_HTML = """
                 flex: 1 1 100px;
             }
 
-            /* Convert Table to Touch-Friendly Cards on Mobile */
             .file-table, .file-table thead, .file-table tbody, .file-table th, .file-table td, .file-table tr {
                 display: block;
             }
@@ -757,8 +911,42 @@ UPLOAD_HTML = """
 <div class="container">
     <header>
         <h1>QuickShare</h1>
-        <p>Fast • Secure • Resumable Local Transfers</p>
+        <p>Fast • Secure • Resumable Local Network Transfers</p>
     </header>
+
+    <!-- LAN Connection Info Card -->
+    <div class="card lan-card" aria-label="Local Network Status">
+        <div class="lan-info">
+            <div class="lan-indicator" title="Server is active on LAN"></div>
+            <div class="lan-details">
+                <span class="lan-title">Local Network Sharing Active</span>
+                <span class="lan-url" id="lanUrlText">{{ lan_url }}</span>
+            </div>
+        </div>
+        <div class="lan-actions">
+            <button class="btn btn-sm btn-secondary" id="copyUrlBtn" onclick="copyLanUrl()">Copy Address</button>
+            <button class="btn btn-sm" onclick="openQrModal()">📱 Mobile QR</button>
+        </div>
+    </div>
+
+    <!-- QR Code Modal -->
+    <div class="qr-modal-overlay" id="qrModal" onclick="closeQrModal(event)">
+        <div class="qr-modal-card" onclick="event.stopPropagation()">
+            <div style="font-weight: 700; font-size: 1.15rem;">Scan on Mobile</div>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: -0.5rem;">
+                Connect phone to the same Wi-Fi network and scan to open QuickShare:
+            </p>
+            <div class="qr-image-container" id="qrContainer">
+                {% if qr_svg %}
+                    {{ qr_svg|safe }}
+                {% else %}
+                    <img src="/qr" alt="Scan to connect on mobile" style="width:100%; height:100%;">
+                {% endif %}
+            </div>
+            <div style="font-size: 0.85rem; font-weight: 600; color: var(--primary);">{{ lan_url }}</div>
+            <button class="btn btn-sm btn-secondary" style="width: 100%;" onclick="closeQrModal()">Close</button>
+        </div>
+    </div>
 
     <!-- Upload Card -->
     <main class="card" aria-label="File Upload Section">
@@ -863,6 +1051,27 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Helper: Copy LAN URL to clipboard
+function copyLanUrl() {
+    const url = document.getElementById("lanUrlText").textContent;
+    navigator.clipboard.writeText(url).then(() => {
+        const btn = document.getElementById("copyUrlBtn");
+        const originalText = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => { btn.textContent = originalText; }, 2000);
+    }).catch(() => {
+        alert("LAN URL: " + url);
+    });
+}
+
+function openQrModal() {
+    document.getElementById("qrModal").style.display = "flex";
+}
+
+function closeQrModal(event) {
+    document.getElementById("qrModal").style.display = "none";
 }
 
 // ---------------------------------------------------------------------------
@@ -1285,7 +1494,6 @@ class ChunkedUploader {
                 this.bytesSinceLastCheck = 0;
                 this.updateUI();
                 
-                // Properly await uploadChunksLoop to guarantee unified execution
                 await this.uploadChunksLoop();
 
                 if (this.status === 'uploading' && this.receivedChunks.size >= this.totalChunks) {
@@ -1588,7 +1796,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 @app.route('/')
 def index():
-    """Renders the main QuickShare page listing completed files in uploads/."""
+    """Renders the main QuickShare page listing completed files in uploads/ and LAN details."""
     file_list = []
     if os.path.exists(UPLOAD_DIR):
         try:
@@ -1607,7 +1815,29 @@ def index():
         except Exception as e:
             logger.error(f"Error listing uploads directory: {e}")
             
-    return render_template_string(UPLOAD_HTML, files=file_list)
+    lan_ip = get_lan_ip()
+    lan_url = f"http://{lan_ip}:{PORT}"
+    qr_svg = generate_qr_svg(lan_url)
+
+    return render_template_string(
+        UPLOAD_HTML,
+        files=file_list,
+        lan_ip=lan_ip,
+        lan_url=lan_url,
+        qr_svg=qr_svg
+    )
+
+
+@app.route('/qr')
+def qr_code_endpoint():
+    """Returns SVG QR code for the current server LAN access URL."""
+    lan_ip = get_lan_ip()
+    lan_url = f"http://{lan_ip}:{PORT}"
+    svg = generate_qr_svg(lan_url)
+    if svg:
+        return Response(svg, mimetype='image/svg+xml')
+    else:
+        return jsonify({"success": False, "error": "QR generator not available"}), 404
 
 
 @app.route('/upload/start', methods=['POST'])
@@ -1941,7 +2171,7 @@ def upload_complete():
         latest_meta["safe_filename"] = final_filename
         latest_meta["updated_at"] = time.time()
         
-        # Safe final metadata write: even if saving ephemeral cache metadata fails, the finalized file is kept!
+        # Safe final metadata write
         if not save_metadata(upload_id, latest_meta):
             logger.warning(f"Final metadata persistence failed for upload_id={upload_id}, but file was safely finalized to '{final_filename}'")
 
@@ -2007,4 +2237,6 @@ def download_file(filename):
 # Main Application Entry Point
 # -----------------------------------------------------------------------------
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    lan_ip = get_lan_ip()
+    logger.info(f"Starting QuickShare LAN File Transfer Server on http://{lan_ip}:{PORT} (Listening on {HOST}:{PORT}, debug={DEBUG})")
+    app.run(host=HOST, port=PORT, debug=DEBUG)

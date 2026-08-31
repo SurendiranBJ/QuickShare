@@ -23,7 +23,9 @@ from Quickshare import (
     get_chunks_dir,
     save_metadata,
     load_metadata,
-    upload_lock_manager
+    upload_lock_manager,
+    get_lan_ip,
+    generate_qr_svg
 )
 
 class TestQuickShareReliability(unittest.TestCase):
@@ -638,14 +640,16 @@ class TestQuickShareReliability(unittest.TestCase):
         status_res = self.client.get(f'/upload/status/{upload_id}')
         self.assertEqual(status_res.status_code, 404)
 
-    # 27. Edge file sizes (1 byte, 1 KB, exactly 1 chunk, 1 chunk + 1 byte, exact multiple)
+    # 27. Edge file sizes (1 byte, 1 KB, 4.9MB, 5MB, 5MB+1, 10MB, 10MB+1)
     def test_27_edge_file_sizes(self):
         edge_cases = [
             ("1_byte.bin", b"A", 1024),
             ("1_kb.bin", os.urandom(1024), 1024),
-            ("exact_1_chunk.bin", os.urandom(512), 512),
-            ("1_chunk_plus_1.bin", os.urandom(513), 512),
-            ("exact_2_chunks.bin", os.urandom(1024), 512)
+            ("4_9_mb.bin", os.urandom(4900 * 1024), 5 * 1024 * 1024),
+            ("exact_5_mb.bin", os.urandom(5 * 1024 * 1024), 5 * 1024 * 1024),
+            ("5_mb_plus_1.bin", os.urandom(5 * 1024 * 1024 + 1), 5 * 1024 * 1024),
+            ("exact_10_mb.bin", os.urandom(10 * 1024 * 1024), 5 * 1024 * 1024),
+            ("10_mb_plus_1.bin", os.urandom(10 * 1024 * 1024 + 1), 5 * 1024 * 1024)
         ]
 
         for fname, payload, chunk_sz in edge_cases:
@@ -671,6 +675,18 @@ class TestQuickShareReliability(unittest.TestCase):
         clean_expired_cache()
         # Active upload cache must remain intact
         self.assertTrue(os.path.exists(get_upload_cache_dir(uid)))
+
+    # 29. QR Code Endpoint & LAN IP Resolution
+    def test_29_qr_endpoint_and_lan_ip_detection(self):
+        lan_ip = get_lan_ip()
+        self.assertIsInstance(lan_ip, str)
+        self.assertTrue(len(lan_ip) > 0)
+
+        qr_res = self.client.get('/qr')
+        self.assertIn(qr_res.status_code, [200, 404])
+        if qr_res.status_code == 200:
+            self.assertEqual(qr_res.mimetype, 'image/svg+xml')
+            self.assertIn(b'<svg', qr_res.data)
 
 
 if __name__ == '__main__':
