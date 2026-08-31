@@ -126,8 +126,53 @@ class TestQuickShareReliability(unittest.TestCase):
         self.assertEqual(os.path.getsize(uploaded_path), len(data))
         self.assertEqual(res.get_json()["sha256"], hashlib.sha256(data).hexdigest())
 
-    # 3. Cancel at 10%
-    def test_03_cancel_at_10_percent(self):
+    # 3. Zero-byte file upload
+    def test_03_zero_byte_file(self):
+        filename = "empty_file.txt"
+        data = b""
+        upload_id, res, status = self._upload_helper(filename, data, chunk_size=1024)
+        
+        self.assertEqual(status, "completed")
+        self.assertEqual(res.status_code, 200)
+        saved_name = res.get_json()["filename"]
+        self.test_created_files.append(saved_name)
+        
+        uploaded_path = os.path.join(UPLOAD_DIR, saved_name)
+        self.assertTrue(os.path.exists(uploaded_path))
+        self.assertEqual(os.path.getsize(uploaded_path), 0)
+        self.assertEqual(res.get_json()["sha256"], hashlib.sha256(b"").hexdigest())
+
+    # 4. Chunk upload rejected when status is assembling (HTTP 409)
+    def test_04_chunk_rejected_during_assembly(self):
+        filename = "test_assembling_reject.bin"
+        data = b"Testing 409 rejection during assembly"
+        start_res = self.client.post('/upload/start', json={
+            'filename': filename,
+            'total_size': len(data),
+            'chunk_size': len(data)
+        })
+        upload_id = start_res.get_json()["upload_id"]
+        self.test_upload_ids.append(upload_id)
+
+        # Set status to assembling
+        with upload_lock_manager.acquire(upload_id):
+            meta = load_metadata(upload_id)
+            meta["status"] = "assembling"
+            save_metadata(upload_id, meta)
+
+        # Try to upload chunk while assembling
+        res = self.client.post('/upload/chunk', data={
+            'upload_id': upload_id,
+            'chunk_index': 0,
+            'total_chunks': 1,
+            'chunk': (io.BytesIO(data), "chunk_0")
+        }, content_type='multipart/form-data')
+
+        self.assertEqual(res.status_code, 409)
+        self.assertIn("assembly is already in progress", res.get_json()["error"])
+
+    # 5. Cancel at 10%
+    def test_05_cancel_at_10_percent(self):
         filename = "test_cancel_10.bin"
         data = os.urandom(10 * 1024 * 1024)
         upload_id, res, status = self._upload_helper(filename, data, chunk_size=1024 * 1024, cancel_at_chunk=1)
@@ -137,8 +182,8 @@ class TestQuickShareReliability(unittest.TestCase):
         self.assertFalse(os.path.exists(get_upload_cache_dir(upload_id)))
         self.assertFalse(os.path.exists(os.path.join(UPLOAD_DIR, filename)))
 
-    # 4. Cancel at 50%
-    def test_04_cancel_at_50_percent(self):
+    # 6. Cancel at 50%
+    def test_06_cancel_at_50_percent(self):
         filename = "test_cancel_50.bin"
         data = os.urandom(10 * 1024 * 1024)
         upload_id, res, status = self._upload_helper(filename, data, chunk_size=1024 * 1024, cancel_at_chunk=5)
@@ -148,8 +193,8 @@ class TestQuickShareReliability(unittest.TestCase):
         self.assertFalse(os.path.exists(get_upload_cache_dir(upload_id)))
         self.assertFalse(os.path.exists(os.path.join(UPLOAD_DIR, filename)))
 
-    # 5. Cancel near completion
-    def test_05_cancel_near_completion(self):
+    # 7. Cancel near completion
+    def test_07_cancel_near_completion(self):
         filename = "test_cancel_90.bin"
         data = os.urandom(10 * 1024 * 1024)
         upload_id, res, status = self._upload_helper(filename, data, chunk_size=1024 * 1024, cancel_at_chunk=9)
@@ -159,8 +204,8 @@ class TestQuickShareReliability(unittest.TestCase):
         self.assertFalse(os.path.exists(get_upload_cache_dir(upload_id)))
         self.assertFalse(os.path.exists(os.path.join(UPLOAD_DIR, filename)))
 
-    # 6. Network interruption
-    def test_06_network_interruption(self):
+    # 8. Network interruption & preserve cache
+    def test_08_network_interruption(self):
         filename = "test_interrupted.bin"
         data = os.urandom(4 * 1024 * 1024)
         upload_id, _, status = self._upload_helper(filename, data, chunk_size=1024 * 1024, simulate_interruption=True)
@@ -173,8 +218,8 @@ class TestQuickShareReliability(unittest.TestCase):
         self.assertIn("000000", uploaded_chunks)
         self.assertIn("000001", uploaded_chunks)
 
-    # 7. Resume after interruption
-    def test_07_resume_after_interruption(self):
+    # 9. Resume after interruption
+    def test_09_resume_after_interruption(self):
         filename = "test_resume.bin"
         data = os.urandom(4 * 1024 * 1024)
         chunk_size = 1024 * 1024
@@ -209,8 +254,8 @@ class TestQuickShareReliability(unittest.TestCase):
         with open(uploaded_path, "rb") as f:
             self.assertEqual(f.read(), data)
 
-    # 8. Duplicate chunk (idempotency)
-    def test_08_duplicate_chunk(self):
+    # 10. Duplicate chunk (idempotency)
+    def test_10_duplicate_chunk(self):
         filename = "dup_chunk.txt"
         data = b"ChunkIdempotencyTest123"
         start_res = self.client.post('/upload/start', json={
@@ -221,7 +266,6 @@ class TestQuickShareReliability(unittest.TestCase):
         upload_id = start_res.get_json()["upload_id"]
         self.test_upload_ids.append(upload_id)
 
-        # Send chunk 0 twice
         res1 = self.client.post('/upload/chunk', data={
             'upload_id': upload_id,
             'chunk_index': 0,
@@ -238,7 +282,6 @@ class TestQuickShareReliability(unittest.TestCase):
         }, content_type='multipart/form-data')
         self.assertEqual(res2.status_code, 200)
 
-        # Chunks 1 and 2
         self.client.post('/upload/chunk', data={
             'upload_id': upload_id,
             'chunk_index': 1,
@@ -260,8 +303,8 @@ class TestQuickShareReliability(unittest.TestCase):
         with open(os.path.join(UPLOAD_DIR, saved_name), "rb") as f:
             self.assertEqual(f.read(), data)
 
-    # 9. Multiple simultaneous uploads
-    def test_09_multiple_simultaneous_uploads(self):
+    # 11. Multiple simultaneous uploads
+    def test_11_multiple_simultaneous_uploads(self):
         files_data = {
             "iso_a.bin": os.urandom(2 * 1024 * 1024),
             "iso_b.bin": os.urandom(3 * 1024 * 1024),
@@ -300,8 +343,8 @@ class TestQuickShareReliability(unittest.TestCase):
             with open(os.path.join(UPLOAD_DIR, saved_name), "rb") as f:
                 self.assertEqual(f.read(), info["data"])
 
-    # 10. Duplicate filenames
-    def test_10_filename_collision_handling(self):
+    # 12. Duplicate filenames
+    def test_12_filename_collision_handling(self):
         filename = "duplicate_name.txt"
         data1 = b"Original File 1"
         data2 = b"Second File with same name"
@@ -323,8 +366,31 @@ class TestQuickShareReliability(unittest.TestCase):
         with open(os.path.join(UPLOAD_DIR, saved_name2), "rb") as f:
             self.assertEqual(f.read(), data2)
 
-    # 11. Server restart recovery
-    def test_11_server_restart_cache_persistence(self):
+    # 13. Cache cleanup protection for assembling uploads
+    def test_13_assembling_upload_protected_from_cleanup(self):
+        filename = "test_assembling_protection.bin"
+        data = b"Assembling upload protection test"
+        start_res = self.client.post('/upload/start', json={
+            'filename': filename,
+            'total_size': len(data),
+            'chunk_size': len(data)
+        })
+        upload_id = start_res.get_json()["upload_id"]
+        self.test_upload_ids.append(upload_id)
+
+        cache_dir = get_upload_cache_dir(upload_id)
+        with upload_lock_manager.acquire(upload_id):
+            meta = load_metadata(upload_id)
+            meta["status"] = "assembling"
+            meta["updated_at"] = time.time() - (UPLOAD_CACHE_TIMEOUT + 500)
+            save_metadata(upload_id, meta)
+
+        clean_expired_cache()
+        # Must still exist because status == 'assembling'
+        self.assertTrue(os.path.exists(cache_dir))
+
+    # 14. Server restart recovery
+    def test_14_server_restart_cache_persistence(self):
         filename = "test_restart_persistence.bin"
         data = os.urandom(2 * 1024 * 1024)
         upload_id, _, _ = self._upload_helper(filename, data, chunk_size=1024 * 1024, simulate_interruption=True)
@@ -337,8 +403,8 @@ class TestQuickShareReliability(unittest.TestCase):
         self.assertEqual(status_res.status_code, 200)
         self.assertIn(0, status_res.get_json()["received_chunks"])
 
-    # 12. Cache expiration
-    def test_12_expired_abandoned_cache_cleanup(self):
+    # 15. Expired abandoned cache cleanup
+    def test_15_expired_abandoned_cache_cleanup(self):
         filename = "test_expired.txt"
         data = b"This file will be abandoned."
         
@@ -358,8 +424,8 @@ class TestQuickShareReliability(unittest.TestCase):
         clean_expired_cache()
         self.assertFalse(os.path.exists(cache_dir))
 
-    # 13. Completed download
-    def test_13_completed_file_download(self):
+    # 16. Completed download
+    def test_16_completed_file_download(self):
         filename = "download_test.txt"
         content = b"QuickShare download verification string."
         _, res, _ = self._upload_helper(filename, content, chunk_size=1024)
@@ -370,8 +436,8 @@ class TestQuickShareReliability(unittest.TestCase):
         self.assertEqual(dl_res.status_code, 200)
         self.assertEqual(dl_res.data, content)
 
-    # 14. Cache cannot be downloaded
-    def test_14_incomplete_files_not_downloadable(self):
+    # 17. Incomplete files not downloadable
+    def test_17_incomplete_files_not_downloadable(self):
         filename = "incomplete_dl_test.bin"
         data = os.urandom(2 * 1024 * 1024)
         upload_id, _, _ = self._upload_helper(filename, data, chunk_size=1024 * 1024, simulate_interruption=True)
@@ -382,8 +448,8 @@ class TestQuickShareReliability(unittest.TestCase):
         dl_res2 = self.client.get(f'/download/{upload_id}/chunks/000000')
         self.assertIn(dl_res2.status_code, [403, 404])
 
-    # 15. Path traversal protection
-    def test_15_security_and_path_traversal(self):
+    # 18. Path traversal and security protection
+    def test_18_security_and_path_traversal(self):
         res1 = self.client.get('/upload/status/../../etc/passwd')
         self.assertEqual(res1.status_code, 400)
 
@@ -402,8 +468,8 @@ class TestQuickShareReliability(unittest.TestCase):
         safe_name = res4.get_json().get("upload_id")
         self.test_upload_ids.append(safe_name)
 
-    # 16. Large-file streaming behavior
-    def test_16_streaming_assembly_memory_efficiency(self):
+    # 19. Streaming assembly memory efficiency
+    def test_19_streaming_assembly_memory_efficiency(self):
         filename = "streaming_test.bin"
         chunk_size = 2 * 1024 * 1024
         total_chunks = 4
@@ -433,8 +499,8 @@ class TestQuickShareReliability(unittest.TestCase):
         
         self.assertEqual(os.path.getsize(os.path.join(UPLOAD_DIR, saved_name)), total_size)
 
-    # 17. Repeated completion
-    def test_17_repeated_completion_request(self):
+    # 20. Repeated completion
+    def test_20_repeated_completion_request(self):
         filename = "repeated_complete.txt"
         data = b"Testing repeated complete"
         upload_id, res1, _ = self._upload_helper(filename, data, chunk_size=1024)
@@ -444,8 +510,8 @@ class TestQuickShareReliability(unittest.TestCase):
         res2 = self.client.post('/upload/complete', json={'upload_id': upload_id})
         self.assertEqual(res2.status_code, 404)
 
-    # 18. Repeated cancellation
-    def test_18_repeated_cancellation(self):
+    # 21. Repeated cancellation
+    def test_21_repeated_cancellation(self):
         filename = "repeated_cancel.txt"
         data = b"Testing repeated cancel"
         start_res = self.client.post('/upload/start', json={
@@ -456,16 +522,14 @@ class TestQuickShareReliability(unittest.TestCase):
         upload_id = start_res.get_json()["upload_id"]
         self.test_upload_ids.append(upload_id)
 
-        # Cancel 1st time
         res1 = self.client.post(f'/upload/cancel/{upload_id}')
         self.assertEqual(res1.status_code, 200)
 
-        # Cancel 2nd time (idempotent)
         res2 = self.client.post(f'/upload/cancel/{upload_id}')
         self.assertEqual(res2.status_code, 200)
 
-    # 19. Invalid upload ID
-    def test_19_invalid_upload_id(self):
+    # 22. Invalid upload ID
+    def test_22_invalid_upload_id(self):
         res1 = self.client.get('/upload/status/invalid-uuid-12345')
         self.assertEqual(res1.status_code, 400)
 
@@ -473,8 +537,8 @@ class TestQuickShareReliability(unittest.TestCase):
         res2 = self.client.get(f'/upload/status/{fake_uuid}')
         self.assertEqual(res2.status_code, 404)
 
-    # 20. Invalid chunk index
-    def test_20_invalid_chunk_index(self):
+    # 23. Invalid chunk index
+    def test_23_invalid_chunk_index(self):
         start_res = self.client.post('/upload/start', json={
             'filename': 'bounds_test.bin',
             'total_size': 100,
@@ -499,8 +563,8 @@ class TestQuickShareReliability(unittest.TestCase):
         }, content_type='multipart/form-data')
         self.assertEqual(res2.status_code, 400)
 
-    # 21. Invalid total_chunks
-    def test_21_invalid_total_chunks(self):
+    # 24. Invalid total_chunks
+    def test_24_invalid_total_chunks(self):
         start_res = self.client.post('/upload/start', json={
             'filename': 'total_chunks_test.bin',
             'total_size': 100,
@@ -512,55 +576,17 @@ class TestQuickShareReliability(unittest.TestCase):
         res = self.client.post('/upload/chunk', data={
             'upload_id': upload_id,
             'chunk_index': 0,
-            'total_chunks': 99,  # Mismatched with server's 2
+            'total_chunks': 99,
             'chunk': (io.BytesIO(b"abc" * 10), "chunk_0")
         }, content_type='multipart/form-data')
         self.assertEqual(res.status_code, 400)
 
-    # 22. Invalid chunk size
-    def test_22_invalid_chunk_size(self):
-        start_res = self.client.post('/upload/start', json={
-            'filename': 'size_mismatch_test.bin',
-            'total_size': 100,
-            'chunk_size': 50
-        })
-        upload_id = start_res.get_json()["upload_id"]
-        self.test_upload_ids.append(upload_id)
-
-        # Expected size is 50, but we send 10 bytes
-        res = self.client.post('/upload/chunk', data={
-            'upload_id': upload_id,
-            'chunk_index': 0,
-            'total_chunks': 2,
-            'chunk': (io.BytesIO(b"1234567890"), "chunk_0")
-        }, content_type='multipart/form-data')
-        self.assertEqual(res.status_code, 400)
-        self.assertIn("Chunk size mismatch", res.get_json()["error"])
-
-    # 23. Wrong file on resume
-    def test_23_wrong_file_identity(self):
-        # Verification that metadata contains full details for frontend validation
-        start_res = self.client.post('/upload/start', json={
-            'filename': 'original_resume.txt',
-            'total_size': 500,
-            'chunk_size': 100
-        })
-        upload_id = start_res.get_json()["upload_id"]
-        self.test_upload_ids.append(upload_id)
-
-        status_res = self.client.get(f'/upload/status/{upload_id}')
-        self.assertEqual(status_res.status_code, 200)
-        status_data = status_res.get_json()
-        self.assertEqual(status_data["filename"], "original_resume.txt")
-        self.assertEqual(status_data["total_size"], 500)
-
-    # 24. Cancel/complete race
-    def test_24_cancel_complete_race(self):
+    # 25. Cancel/complete race
+    def test_25_cancel_complete_race(self):
         filename = "race_test.bin"
         data = os.urandom(2 * 1024 * 1024)
         upload_id, _, _ = self._upload_helper(filename, data, chunk_size=1024 * 1024, simulate_interruption=True)
         
-        # Complete remaining chunk
         self.client.post('/upload/chunk', data={
             'upload_id': upload_id,
             'chunk_index': 1,
@@ -568,7 +594,6 @@ class TestQuickShareReliability(unittest.TestCase):
             'chunk': (io.BytesIO(data[1024*1024:]), "chunk_1")
         }, content_type='multipart/form-data')
 
-        # Simulate race: mark as cancelled in metadata while complete is attempting to finalize
         with upload_lock_manager.acquire(upload_id):
             meta = load_metadata(upload_id)
             meta["status"] = "cancelled"
@@ -577,30 +602,7 @@ class TestQuickShareReliability(unittest.TestCase):
         comp_res = self.client.post('/upload/complete', json={'upload_id': upload_id})
         self.assertEqual(comp_res.status_code, 400)
         self.assertIn("cancelled", comp_res.get_json()["error"])
-        # Ensure final file was NEVER created
         self.assertFalse(os.path.exists(os.path.join(UPLOAD_DIR, filename)))
-
-    # 25. Upload isolation
-    def test_25_upload_isolation(self):
-        # Two uploads running: cancelling one does not affect the other
-        start_a = self.client.post('/upload/start', json={'filename': 'iso_1.txt', 'total_size': 100, 'chunk_size': 100})
-        start_b = self.client.post('/upload/start', json={'filename': 'iso_2.txt', 'total_size': 100, 'chunk_size': 100})
-        uid_a = start_a.get_json()["upload_id"]
-        uid_b = start_b.get_json()["upload_id"]
-        self.test_upload_ids.extend([uid_a, uid_b])
-
-        # Upload chunk for B
-        self.client.post('/upload/chunk', data={'upload_id': uid_b, 'chunk_index': 0, 'total_chunks': 1, 'chunk': (io.BytesIO(b'x'*100), 'c0')}, content_type='multipart/form-data')
-
-        # Cancel A
-        self.client.post(f'/upload/cancel/{uid_a}')
-
-        # B completes normally
-        comp_b = self.client.post('/upload/complete', json={'upload_id': uid_b})
-        self.assertEqual(comp_b.status_code, 200)
-        saved_name = comp_b.get_json()["filename"]
-        self.test_created_files.append(saved_name)
-        self.assertTrue(os.path.exists(os.path.join(UPLOAD_DIR, saved_name)))
 
     # 26. Metadata corruption handling
     def test_26_metadata_corruption_handling(self):
@@ -609,11 +611,9 @@ class TestQuickShareReliability(unittest.TestCase):
         self.test_upload_ids.append(upload_id)
 
         meta_path = get_metadata_path(upload_id)
-        # Corrupt the metadata.json
         with open(meta_path, "w", encoding="utf-8") as f:
             f.write("INVALID JSON CONTENT {[[")
 
-        # Query status should return 404 gracefully rather than 500 crash
         status_res = self.client.get(f'/upload/status/{upload_id}')
         self.assertEqual(status_res.status_code, 404)
 

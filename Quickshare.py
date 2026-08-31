@@ -222,7 +222,6 @@ def clean_expired_cache():
                 continue
             
             with upload_lock_manager.acquire(entry):
-                # Check upload metadata
                 meta = load_metadata(entry)
                 last_activity = None
                 status = "unknown"
@@ -230,15 +229,15 @@ def clean_expired_cache():
                     last_activity = meta.get("updated_at")
                     status = meta.get("status", "unknown")
                 
+                # Rule: Assembling uploads are strictly protected from normal cache cleanup
+                if status == "assembling":
+                    continue
+
                 if last_activity is None:
                     try:
                         last_activity = os.path.getmtime(item_path)
                     except OSError:
                         continue
-                
-                # Do not delete if currently assembling unless assembling has timed out (> 10 mins)
-                if status == "assembling" and (now - last_activity < 600):
-                    continue
 
                 if now - last_activity > UPLOAD_CACHE_TIMEOUT:
                     logger.info(f"UPLOAD EXPIRED: upload_id={entry} inactive for {int(now - last_activity)}s. Deleting cache.")
@@ -266,12 +265,9 @@ def cache_cleanup_worker():
 clean_expired_cache()
 
 # Start background cleanup thread safely with Flask debug reloader
-def start_cleanup_thread_if_needed():
-    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        cleanup_thread = threading.Thread(target=cache_cleanup_worker, daemon=True, name="CacheCleanupWorker")
-        cleanup_thread.start()
-
-start_cleanup_thread_if_needed()
+if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+    cleanup_thread = threading.Thread(target=cache_cleanup_worker, daemon=True, name="CacheCleanupWorker")
+    cleanup_thread.start()
 
 # -----------------------------------------------------------------------------
 # Frontend HTML / UI Template
@@ -853,11 +849,15 @@ class ChunkedUploader {
         this.status = 'initializing'; // initializing, uploading, paused, assembling, completed, cancelled, error
         this.errorMessage = '';
         
+        // Loop generation counter to prevent duplicate concurrent loops
+        this.uploadGeneration = 0;
+        this.isLoopRunning = false;
+        
         // Progress & Smoothed Speed tracking
         this.uploadedBytes = 0;
         this.lastSpeedCheck = Date.now();
         this.bytesSinceLastCheck = 0;
-        this.currentSpeed = 0; // Bytes/sec (exponential moving average)
+        this.currentSpeed = 0; // Bytes/sec
         
         // Abort controllers for all active chunk requests
         this.abortControllers = new Map();
@@ -925,6 +925,8 @@ class ChunkedUploader {
             }
             this.uploadedBytes = confirmedBytes;
             percent = Math.min(99, Math.round((confirmedBytes / this.totalSize) * 100));
+        } else if (this.totalSize === 0 && this.receivedChunks.size > 0) {
+            percent = (this.status === 'completed') ? 100 : 99;
         }
 
         if (this.status === 'completed') {
@@ -1010,13 +1012,18 @@ class ChunkedUploader {
                 this.chunkSize = startData.chunk_size;
                 this.totalChunks = startData.total_chunks;
             } else {
-                // Query server for existing status to resume
                 const statusRes = await fetch(`/upload/status/${this.uploadId}`);
+                if (!statusRes.ok) {
+                    const errData = await statusRes.json().catch(() => ({}));
+                    throw new Error(errData.error || "Upload session expired or not found");
+                }
                 const statusData = await statusRes.json();
                 if (statusData.success) {
                     this.receivedChunks = new Set(statusData.received_chunks);
                     this.chunkSize = statusData.chunk_size;
                     this.totalChunks = statusData.total_chunks;
+                } else {
+                    throw new Error(statusData.error || "Upload session not found");
                 }
             }
 
@@ -1071,72 +1078,82 @@ class ChunkedUploader {
     }
 
     async uploadChunksLoop() {
-        const queue = [];
-        for (let i = 0; i < this.totalChunks; i++) {
-            if (!this.receivedChunks.has(i)) {
-                queue.push(i);
+        if (this.isLoopRunning) return;
+        this.isLoopRunning = true;
+        this.uploadGeneration++;
+        const currentGen = this.uploadGeneration;
+
+        try {
+            const queue = [];
+            for (let i = 0; i < this.totalChunks; i++) {
+                if (!this.receivedChunks.has(i)) {
+                    queue.push(i);
+                }
             }
-        }
 
-        let workerCount = Math.min(UPLOAD_CONCURRENCY, queue.length || 1);
-        const workers = [];
+            let workerCount = Math.min(UPLOAD_CONCURRENCY, queue.length || 1);
+            const workers = [];
 
-        // Smoothed speed calculation timer
-        const speedInterval = setInterval(() => {
-            if (this.status !== 'uploading') {
-                clearInterval(speedInterval);
-                return;
-            }
-            const now = Date.now();
-            const elapsed = (now - this.lastSpeedCheck) / 1000;
-            if (elapsed > 0.5) {
-                const instantSpeed = this.bytesSinceLastCheck / elapsed;
-                // Exponential moving average for smooth display
-                this.currentSpeed = this.currentSpeed === 0 ? Math.round(instantSpeed) : Math.round(0.7 * instantSpeed + 0.3 * this.currentSpeed);
-                this.bytesSinceLastCheck = 0;
-                this.lastSpeedCheck = now;
-                this.updateUI();
-            }
-        }, 600);
+            // Smoothed speed calculation timer
+            const speedInterval = setInterval(() => {
+                if (this.status !== 'uploading' || this.uploadGeneration !== currentGen) {
+                    clearInterval(speedInterval);
+                    return;
+                }
+                const now = Date.now();
+                const elapsed = (now - this.lastSpeedCheck) / 1000;
+                if (elapsed > 0.5) {
+                    const instantSpeed = this.bytesSinceLastCheck / elapsed;
+                    this.currentSpeed = this.currentSpeed === 0 ? Math.round(instantSpeed) : Math.round(0.7 * instantSpeed + 0.3 * this.currentSpeed);
+                    this.bytesSinceLastCheck = 0;
+                    this.lastSpeedCheck = now;
+                    this.updateUI();
+                }
+            }, 600);
 
-        for (let w = 0; w < workerCount; w++) {
-            workers.push((async () => {
-                while (queue.length > 0 && this.status === 'uploading') {
-                    const chunkIndex = queue.shift();
-                    let success = false;
-                    let retries = 0;
+            for (let w = 0; w < workerCount; w++) {
+                workers.push((async () => {
+                    while (queue.length > 0 && this.status === 'uploading' && this.uploadGeneration === currentGen) {
+                        const chunkIndex = queue.shift();
+                        let success = false;
+                        let retries = 0;
 
-                    while (!success && retries < MAX_CHUNK_RETRIES && this.status === 'uploading') {
-                        try {
-                            await this.uploadSingleChunk(chunkIndex);
-                            success = true;
-                            this.receivedChunks.add(chunkIndex);
-                            this.updateUI();
-                        } catch (err) {
-                            if (this.status !== 'uploading') break;
-                            retries++;
-                            console.warn(`Retry ${retries}/${MAX_CHUNK_RETRIES} for chunk ${chunkIndex}:`, err);
-                            await new Promise(r => setTimeout(r, Math.min(800 * Math.pow(1.5, retries), 6000)));
+                        while (!success && retries < MAX_CHUNK_RETRIES && this.status === 'uploading' && this.uploadGeneration === currentGen) {
+                            try {
+                                await this.uploadSingleChunk(chunkIndex, currentGen);
+                                success = true;
+                                this.receivedChunks.add(chunkIndex);
+                                this.updateUI();
+                            } catch (err) {
+                                if (this.status !== 'uploading' || this.uploadGeneration !== currentGen) break;
+                                retries++;
+                                console.warn(`Retry ${retries}/${MAX_CHUNK_RETRIES} for chunk ${chunkIndex}:`, err);
+                                await new Promise(r => setTimeout(r, Math.min(800 * Math.pow(1.5, retries), 6000)));
+                            }
+                        }
+
+                        if (!success && this.status === 'uploading' && this.uploadGeneration === currentGen) {
+                            throw new Error(`Failed to upload chunk #${chunkIndex} after ${MAX_CHUNK_RETRIES} attempts`);
                         }
                     }
+                })());
+            }
 
-                    if (!success && this.status === 'uploading') {
-                        throw new Error(`Failed to upload chunk #${chunkIndex} after ${MAX_CHUNK_RETRIES} attempts`);
-                    }
-                }
-            })());
+            await Promise.all(workers);
+            clearInterval(speedInterval);
+        } finally {
+            if (this.uploadGeneration === currentGen) {
+                this.isLoopRunning = false;
+            }
         }
-
-        await Promise.all(workers);
-        clearInterval(speedInterval);
     }
 
-    async uploadSingleChunk(chunkIndex) {
-        if (this.status !== 'uploading') return;
+    async uploadSingleChunk(chunkIndex, currentGen) {
+        if (this.status !== 'uploading' || this.uploadGeneration !== currentGen) return;
 
         const start = chunkIndex * this.chunkSize;
         const end = Math.min(start + this.chunkSize, this.totalSize);
-        const chunkBlob = this.file.slice(start, end);
+        const chunkBlob = (this.totalSize === 0) ? new Blob([]) : this.file.slice(start, end);
         const chunkSize = end - start;
 
         const formData = new FormData();
@@ -1169,6 +1186,9 @@ class ChunkedUploader {
     pause() {
         if (this.status !== 'uploading') return;
         this.status = 'paused';
+        this.uploadGeneration++;
+        this.isLoopRunning = false;
+
         // Abort in-flight requests
         for (let controller of this.abortControllers.values()) {
             controller.abort();
@@ -1178,14 +1198,21 @@ class ChunkedUploader {
     }
 
     resume() {
-        if (this.status !== 'paused') return;
+        if (this.status !== 'paused' && this.status !== 'error') return;
         this.status = 'uploading';
+        this.errorMessage = '';
         this.lastSpeedCheck = Date.now();
         this.bytesSinceLastCheck = 0;
         this.updateUI();
 
         // Query server to get actual missing chunks
-        fetch(`/upload/status/${this.uploadId}`).then(res => res.json()).then(statusData => {
+        fetch(`/upload/status/${this.uploadId}`).then(res => {
+            if (!res.ok) {
+                return res.json().then(e => { throw new Error(e.error || "Upload expired or not found on server"); });
+            }
+            return res.json();
+        }).then(statusData => {
+            if (this.status !== 'uploading') return;
             if (statusData.success) {
                 this.receivedChunks = new Set(statusData.received_chunks);
             }
@@ -1220,6 +1247,8 @@ class ChunkedUploader {
 
     async cancel() {
         this.status = 'cancelled';
+        this.uploadGeneration++;
+        this.isLoopRunning = false;
 
         // Abort all active fetch requests immediately
         for (let controller of this.abortControllers.values()) {
@@ -1326,9 +1355,11 @@ function filterFiles() {
 // Page visibility and connection recovery
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-        // Tab is active again: verify active uploaders
         activeUploaders.forEach(uploader => {
-            if (uploader.status === 'uploading') {
+            if (uploader.status === 'uploading' && !uploader.isLoopRunning) {
+                // Resume loop safely if workers were suspended by browser throttling
+                uploader.uploadChunksLoop();
+            } else if (uploader.status === 'uploading') {
                 uploader.updateUI();
             }
         });
@@ -1336,7 +1367,12 @@ document.addEventListener('visibilitychange', () => {
 });
 
 window.addEventListener('online', () => {
-    logger?.info?.("Network online detected");
+    console.info("Network online detected: reconciling active uploads");
+    activeUploaders.forEach(uploader => {
+        if (uploader.status === 'uploading' || uploader.status === 'error') {
+            uploader.resume();
+        }
+    });
 });
 
 // Init
@@ -1460,8 +1496,13 @@ def upload_chunk():
         if not metadata:
             return jsonify({"success": False, "error": "Upload session metadata not found"}), 404
 
-        if metadata.get("status") in ["cancelled", "completed", "failed"]:
-            return jsonify({"success": False, "error": f"Upload session is {metadata.get('status')}"}), 400
+        current_status = metadata.get("status")
+        # Strict state validation: if already assembling, reject with 409 Conflict
+        if current_status == "assembling":
+            return jsonify({"success": False, "error": "Upload assembly is already in progress"}), 409
+
+        if current_status in ["cancelled", "completed", "failed"]:
+            return jsonify({"success": False, "error": f"Upload session is {current_status}"}), 400
 
         try:
             chunk_index = int(chunk_index_raw)
@@ -1493,7 +1534,7 @@ def upload_chunk():
             chunk_file.save(temp_chunk_path)
             actual_chunk_size = os.path.getsize(temp_chunk_path)
 
-            if actual_chunk_size != expected_chunk_size and metadata["total_size"] > 0:
+            if actual_chunk_size != expected_chunk_size:
                 os.remove(temp_chunk_path)
                 return jsonify({
                     "success": False,
@@ -1506,7 +1547,8 @@ def upload_chunk():
             # Update metadata
             metadata["received_chunks"].add(chunk_index)
             metadata["updated_at"] = time.time()
-            save_metadata(upload_id, metadata)
+            if not save_metadata(upload_id, metadata):
+                return jsonify({"success": False, "error": "Failed to persist upload metadata"}), 500
 
         except Exception as e:
             if os.path.exists(temp_chunk_path):
@@ -1528,7 +1570,7 @@ def upload_chunk():
 
 @app.route('/upload/status/<path:upload_id>', methods=['GET'])
 def upload_status(upload_id):
-    """Returns the current state and missing chunks of an upload session."""
+    """Returns the current authoritative state and missing chunks of an upload session."""
     if not is_valid_uuid(upload_id):
         return jsonify({"success": False, "error": "Invalid upload_id format"}), 400
 
@@ -1541,19 +1583,20 @@ def upload_status(upload_id):
         if not metadata:
             return jsonify({"success": False, "error": "Upload session metadata not found"}), 404
 
-        # Cross-reference received_chunks with actual chunk files on disk
+        total_chunks = metadata["total_chunks"]
         chunks_dir = get_chunks_dir(upload_id)
         actual_chunks = set()
         if os.path.exists(chunks_dir):
             for fname in os.listdir(chunks_dir):
                 if fname.isdigit():
-                    actual_chunks.add(int(fname))
+                    idx = int(fname)
+                    if 0 <= idx < total_chunks:
+                        actual_chunks.add(idx)
 
         metadata["received_chunks"] = actual_chunks
         metadata["updated_at"] = time.time()
         save_metadata(upload_id, metadata)
 
-        total_chunks = metadata["total_chunks"]
         received_list = sorted(list(actual_chunks))
         missing_chunks = [i for i in range(total_chunks) if i not in actual_chunks]
         next_chunk = missing_chunks[0] if missing_chunks else None
@@ -1627,6 +1670,7 @@ def upload_complete():
         metadata["status"] = "assembling"
         metadata["updated_at"] = time.time()
         save_metadata(upload_id, metadata)
+        logger.info(f"ASSEMBLY START: upload_id={upload_id}, total_chunks={total_chunks}, expected_size={expected_size}")
 
     # -------------------------------------------------------------------------
     # PHASE 2: Streaming Assembly & Hashing (NO LOCK HELD - NON-BLOCKING)
@@ -1652,20 +1696,22 @@ def upload_complete():
 
         if assembled_size != expected_size:
             assembly_error = f"Assembled file size verification failed (expected {expected_size} B, got {assembled_size} B)"
+            logger.error(f"SIZE VERIFICATION FAILURE: upload_id={upload_id} {assembly_error}")
         else:
             client_hash = metadata.get("file_hash")
             calculated_hash = hasher.hexdigest()
             if client_hash and client_hash.lower() != calculated_hash.lower():
                 assembly_error = f"File SHA-256 integrity verification failed ({calculated_hash} != {client_hash})"
+                logger.error(f"SHA-256 FAILURE: upload_id={upload_id} {assembly_error}")
 
     except Exception as e:
         assembly_error = f"Assembly streaming failed: {str(e)}"
+        logger.error(f"ASSEMBLY FAILED: upload_id={upload_id} {assembly_error}")
 
     # -------------------------------------------------------------------------
     # PHASE 3: Re-verify State, Handle Cancel Race, & Finalize (Holding Lock)
     # -------------------------------------------------------------------------
     with upload_lock_manager.acquire(upload_id):
-        # Check if upload was cancelled while assembly was running
         latest_meta = load_metadata(upload_id)
         if not latest_meta or latest_meta.get("status") == "cancelled":
             if os.path.exists(assembled_tmp):
@@ -1678,7 +1724,6 @@ def upload_complete():
             return jsonify({"success": False, "error": "Upload was cancelled during assembly"}), 400
 
         if assembly_error:
-            logger.error(f"UPLOAD FAILED: upload_id={upload_id} {assembly_error}")
             if os.path.exists(assembled_tmp):
                 try:
                     os.remove(assembled_tmp)
@@ -1693,11 +1738,8 @@ def upload_complete():
         with upload_lock_manager.filename_lock():
             final_filename = get_unique_filename(UPLOAD_DIR, latest_meta["safe_filename"])
             final_dest = os.path.join(UPLOAD_DIR, final_filename)
-            
-            # Atomically move assembled file into uploads/
             shutil.move(assembled_tmp, final_dest)
 
-        # Mark completed and delete cache
         latest_meta["status"] = "completed"
         latest_meta["safe_filename"] = final_filename
         latest_meta["updated_at"] = time.time()
@@ -1730,7 +1772,6 @@ def upload_cancel(upload_id):
     with upload_lock_manager.acquire(upload_id):
         if os.path.exists(cache_dir):
             try:
-                # Mark cancelled in metadata if possible before rmtree
                 meta = load_metadata(upload_id)
                 if meta:
                     meta["status"] = "cancelled"
@@ -1753,7 +1794,6 @@ def download_file(filename):
     safe_name = os.path.basename(filename)
     target_path = os.path.join(UPLOAD_DIR, safe_name)
     
-    # Path containment check
     if not is_safe_path(UPLOAD_DIR, target_path):
         abort(403)
         
