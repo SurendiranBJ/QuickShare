@@ -36,8 +36,7 @@ CACHE_DIR = os.path.join(BASE_DIR, "cache")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", 5000))
 DEBUG = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
-
-DEFAULT_CHUNK_SIZE = int(os.getenv("DEFAULT_CHUNK_SIZE", 5 * 1024 * 1024))  # 5 MB default
+DEFAULT_CHUNK_SIZE = int(os.getenv("DEFAULT_CHUNK_SIZE", 8 * 1024 * 1024))  # 8 MB default for high LAN throughput
 UPLOAD_CACHE_TIMEOUT = int(os.getenv("UPLOAD_CACHE_TIMEOUT", 21600))        # 6 hours default
 CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", 1800))                 # 30 mins scan interval
 STREAM_BUFFER_SIZE = 1024 * 1024                                            # 1 MB streaming assembly buffer
@@ -1689,9 +1688,9 @@ UPLOAD_HTML = """
 // ---------------------------------------------------------------------------
 // Client Configuration
 // ---------------------------------------------------------------------------
-const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB optimal chunk size
-const UPLOAD_CONCURRENCY = 3;       // 3 concurrent chunk workers per file
-const MAX_CHUNK_RETRIES = 5;        // Max retry attempts per chunk with exponential backoff
+const CHUNK_SIZE = {{ default_chunk_size|default(8388608) }}; // Configured by server (8 MB default for high LAN speed)
+const UPLOAD_CONCURRENCY = 4;                                  // 4 concurrent chunk workers per file
+const MAX_CHUNK_RETRIES = 5;                                   // Max retry attempts per chunk with exponential backoff
 const STORAGE_KEY = "quickshare_active_uploads";
 
 let activeUploaders = new Map();
@@ -2563,7 +2562,9 @@ dropzone.addEventListener('drop', (e) => {
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
         activeUploaders.forEach(uploader => {
-            uploader.reconcileAndResume(false);
+            if ((uploader.status === 'uploading' && !uploader.isLoopRunning) || uploader.status === 'error') {
+                uploader.reconcileAndResume(false);
+            }
         });
     }
 });
@@ -2572,7 +2573,9 @@ window.addEventListener('online', () => {
     console.info("Network online detected: reconciling active uploads");
     showToast("Network restored");
     activeUploaders.forEach(uploader => {
-        uploader.reconcileAndResume(false);
+        if ((uploader.status === 'uploading' && !uploader.isLoopRunning) || uploader.status === 'error') {
+            uploader.reconcileAndResume(false);
+        }
     });
 });
 
@@ -2627,7 +2630,8 @@ def index():
         lan_ip=lan_ip,
         port=PORT,
         lan_url=lan_url,
-        qr_svg=qr_svg
+        qr_svg=qr_svg,
+        default_chunk_size=DEFAULT_CHUNK_SIZE
     )
 
 
@@ -2789,7 +2793,7 @@ def upload_chunk():
         logger.error(f"Error saving chunk {chunk_index} for upload_id={upload_id}: {e}")
         return jsonify({"success": False, "error": "Internal error storing chunk"}), 500
 
-    logger.info(f"CHUNK RECEIVED: upload_id={upload_id}, chunk={chunk_index}/{metadata['total_chunks']-1}, received_total={len(metadata['received_chunks'])}")
+    logger.debug(f"CHUNK RECEIVED: upload_id={upload_id}, chunk={chunk_index}/{metadata['total_chunks']-1}, received_total={len(metadata['received_chunks'])}")
     return jsonify({
         "success": True,
         "upload_id": upload_id,

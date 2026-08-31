@@ -8,27 +8,28 @@
 
 QuickShare is designed specifically for trusted local network transfers. It does **not** rely on third-party cloud servers, external databases, or complex WebRTC signaling. The Flask server serves as the central coordination and transfer hub.
 
-```
+```text
 [ Device A (e.g., Laptop / PC) ]
-               │
-               ▼ (HTTP Chunked Uploads over LAN)
-[ QuickShare Flask Server ] ──► Staging Cache (cache/<upload_id>/) ──► Verified Storage (uploads/)
-               │
-               ▼ (HTTP Direct Download over LAN)
+               |
+               v (HTTP Chunked Uploads over LAN)
+[ QuickShare Flask Server ] ---> Staging Cache (cache/<upload_id>/) ---> Verified Storage (uploads/)
+               |
+               v (HTTP Direct Download over LAN with Range Support)
 [ Device B (e.g., Phone / Tablet) ]
 ```
 
 ---
 
 ## 2. Key Features
-- **LAN Optimized**: Dynamically discovers and displays the primary LAN IP and generates a scannable mobile QR code for instant phone-to-PC connections.
-- **Chunked Transfers**: Slices large files into manageable 5 MB chunks via browser `File.slice()`, avoiding request timeouts and large payload errors.
+- **LAN Optimized**: Dynamically discovers and displays the primary LAN IP and generates a scannable QR code for instant phone-to-PC connections via the **Connect device** modal.
+- **Chunked Transfers**: Slices large files into manageable 8 MB chunks via browser `File.slice()`, avoiding request timeouts and payload limits.
 - **Resumable Transfers**: Interrupted transfers resume from the exact missing chunk without re-uploading completed chunks.
-- **True Pause & Resume**: Manual pause immediately aborts in-flight network requests (`AbortController`) while safely preserving the server staging cache. Background events (`online`, `visibilitychange`) will **never** override an explicit manual pause.
+- **True Pause & Resume**: Manual pause immediately aborts in-flight network requests (`AbortController`) while safely preserving the server staging cache. Background events (`online`, `visibilitychange`) will never override an explicit manual pause.
 - **Instant Cancellation**: Users can cancel an upload at any time; active network requests are aborted and the staging cache is deleted immediately.
 - **SHA-256 File Integrity Verification**: Computes the SHA-256 hash incrementally during assembly and verifies byte count against the client metadata before publishing.
-- **Controlled Concurrency**: 3 concurrent chunk workers per file (`UPLOAD_CONCURRENCY = 3`) for optimal network saturation without router congestion.
-- **Streaming Assembly**: Large files are assembled using a fixed 64 KB streaming buffer (`infile.read(64 * 1024)`), guaranteeing low memory consumption regardless of file size.
+- **Controlled Concurrency**: 4 concurrent chunk workers per file (`UPLOAD_CONCURRENCY = 4`) for optimal network saturation on 5 GHz Wi-Fi and high-speed LANs.
+- **Streaming Assembly**: Large files are assembled using a fixed 1 MB streaming buffer (`STREAM_BUFFER_SIZE = 1024 * 1024`), guaranteeing low memory consumption regardless of file size.
+- **Safe Receiver Downloads**: Downloads support HTTP Range requests (`206 Partial Content`), media seeking, and multi-client concurrent streaming strictly from `uploads/`. Receiver cancellations or network drops never delete server files.
 - **Collision-Safe Filenames**: Automatically generates unique names (e.g., `video (1).mp4`) without overwriting existing files in `uploads/`.
 - **Cache Isolation**: In-progress chunks remain strictly inside `cache/<upload_id>/` and are never accessible via download endpoints until verified and finalized.
 - **Automatic Cache Cleanup**: Background worker daemon safely purges abandoned incomplete uploads older than `UPLOAD_CACHE_TIMEOUT` (default: 6 hours), while strictly protecting active assemblies (`status == "assembling"`).
@@ -36,20 +37,20 @@ QuickShare is designed specifically for trusted local network transfers. It does
 - **Network & Tab Visibility Recovery**: Automatically reconciles missing chunk state with the server when connection is restored or when returning to a backgrounded tab.
 - **Per-Upload Locking (`UploadLockManager`)**: Independent uploads synchronize on their own isolated lock with reference counting, eliminating global thread contention.
 - **Atomic File Operations**: Metadata files and assembled files use atomic file replacement (`os.replace`) to prevent corruption during sudden server stops.
-- **Mobile-First Responsive UI**: Centered card layout, fluid typography (`clamp`), touch-friendly 44px buttons, and zero horizontal scrolling.
+- **Professional Categorized UI**: Modern dark theme with file-type icons, instant search, horizontal mobile category filtering (All, Images, Videos, Audio, Documents, Archives, Code, Applications, Other), and zero emojis.
 
 ---
 
 ## 3. Directory Structure
 
-```
+```text
 QuickShare/
-├── Quickshare.py          # Flask application, dynamic LAN discovery & embedded responsive UI
-├── requirements.txt       # Production dependencies (Flask, Werkzeug, qrcode)
-├── README.md              # Complete operational and technical manual
-├── .gitignore             # Excludes uploads/, cache/, venv/, and temporary runtime files
-├── uploads/               # Verified completed files (auto-created on startup)
-└── cache/                 # Temporary chunk staging directories (auto-created on startup)
+|-- Quickshare.py          # Flask application, dynamic LAN discovery & embedded responsive UI
+|-- requirements.txt       # Production dependencies (Flask, Werkzeug, qrcode)
+|-- README.md              # Operational and technical manual
+|-- .gitignore             # Excludes uploads/, cache/, venv/, and temporary runtime files
+|-- uploads/               # Verified completed files (auto-created on startup)
+\-- cache/                 # Temporary chunk staging directories (auto-created on startup)
 ```
 
 ---
@@ -110,7 +111,7 @@ python Quickshare.py
 ```
 
 ### Server Output:
-```
+```text
 2026-08-31 20:00:00 [INFO] Starting QuickShare LAN File Transfer Server on http://192.168.1.105:5000 (Listening on 0.0.0.0:5000, debug=False)
  * Serving Flask app 'Quickshare'
  * Running on all addresses (0.0.0.0)
@@ -121,7 +122,7 @@ python Quickshare.py
 ### Accessing QuickShare from Other LAN Devices:
 1. **On the host computer**: Open `http://localhost:5000` or `http://127.0.0.1:5000`.
 2. **From phones, tablets, or other laptops on the same Wi-Fi / LAN**:
-   - **QR Code**: Click **"📱 Mobile QR"** in the top banner on your PC screen and scan the QR code with your phone's camera.
+   - **QR Code**: Click **"Connect device"** in the top navigation bar and scan the QR code with your phone camera.
    - **Direct URL**: Navigate to `http://<LAN-IP>:5000` (e.g., `http://192.168.1.105:5000`).
 
 ---
@@ -135,7 +136,7 @@ All server parameters can be customized via environment variables:
 | `HOST` | `0.0.0.0` | IP String | Network interface to bind to (`0.0.0.0` binds to all LAN interfaces). |
 | `PORT` | `5000` | Integer | TCP port to listen on. |
 | `DEBUG` | `false` | Boolean | Enables Flask debug mode (`true` or `false`). Default is `false` for normal LAN sharing. |
-| `DEFAULT_CHUNK_SIZE` | `5242880` | Bytes | Chunk size for file uploads (Default: 5 MB). |
+| `DEFAULT_CHUNK_SIZE` | `8388608` | Bytes | Chunk size for file uploads (Default: 8 MB). |
 | `UPLOAD_CACHE_TIMEOUT` | `21600` | Seconds | Inactivity duration before an abandoned cache is purged (Default: 6 hours). |
 | `CLEANUP_INTERVAL` | `1800` | Seconds | Frequency at which the cleanup worker scans for expired caches (Default: 30 minutes). |
 
@@ -144,14 +145,14 @@ All server parameters can be customized via environment variables:
 **PowerShell (Windows)**:
 ```powershell
 $env:PORT="8080"
-$env:DEFAULT_CHUNK_SIZE="10485760"      # 10 MB chunks
+$env:DEFAULT_CHUNK_SIZE="8388608"      # 8 MB chunks
 python Quickshare.py
 ```
 
 **Bash / Zsh (Linux / macOS)**:
 ```bash
 export PORT=8080
-export DEFAULT_CHUNK_SIZE=10485760
+export DEFAULT_CHUNK_SIZE=8388608
 python3 Quickshare.py
 ```
 
@@ -167,7 +168,7 @@ python3 Quickshare.py
   {
     "filename": "archive.zip",
     "total_size": 104857600,
-    "chunk_size": 5242880,
+    "chunk_size": 8388608,
     "file_hash": "optional_sha256_hash"
   }
   ```
@@ -176,8 +177,8 @@ python3 Quickshare.py
   {
     "success": true,
     "upload_id": "4b684534-1299-4c5b-801b-5e92c2df6d84",
-    "chunk_size": 5242880,
-    "total_chunks": 20,
+    "chunk_size": 8388608,
+    "total_chunks": 13,
     "status": "uploading"
   }
   ```
@@ -211,10 +212,10 @@ python3 Quickshare.py
     "filename": "archive.zip",
     "safe_filename": "archive.zip",
     "total_size": 104857600,
-    "chunk_size": 5242880,
-    "total_chunks": 20,
+    "chunk_size": 8388608,
+    "total_chunks": 13,
     "received_chunks": [0, 1, 2],
-    "missing_chunks": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+    "missing_chunks": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     "next_chunk": 3,
     "status": "uploading"
   }
@@ -247,9 +248,9 @@ python3 Quickshare.py
 
 ### 6. Download Completed File
 - **URL**: `GET /download/<filename>`
-- **Response**: Binary file stream with `Content-Disposition: attachment`.
+- **Response**: Binary file stream with HTTP Range support (`206 Partial Content`) and `Content-Disposition: attachment`.
 
-### 7. LAN Mobile QR Code
+### 7. LAN QR Code
 - **URL**: `GET /qr`
 - **Response**: SVG QR Code image (`image/svg+xml`) encoding the primary LAN URL.
 
@@ -275,15 +276,15 @@ python3 Quickshare.py
 
 Each upload session resides inside an isolated directory under `cache/`:
 
-```
+```text
 cache/
-└── 4b684534-1299-4c5b-801b-5e92c2df6d84/
-    ├── metadata.json
-    ├── chunks/
-    │   ├── 000000
-    │   ├── 000001
-    │   └── ...
-    └── assembled.tmp (present only during streaming assembly)
+\-- 4b684534-1299-4c5b-801b-5e92c2df6d84/
+    |-- metadata.json
+    |-- chunks/
+    |   |-- 000000
+    |   |-- 000001
+    |   \-- ...
+    \-- assembled.tmp (present only during streaming assembly)
 ```
 
 - **Cancellation**: Entire `cache/<upload_id>/` directory deleted immediately.
@@ -310,7 +311,7 @@ cache/
 
 The following client workflows can be verified across devices on your local network:
 
-- **QR Connection**: Scan QR code from phone camera, verify homepage loads instantly over Wi-Fi.
+- **QR Connection**: Scan QR code from phone camera via "Connect device", verify homepage loads instantly over Wi-Fi.
 - **Phone to PC Transfer**: Select a photo/video on phone, verify fast chunked upload to PC.
 - **PC to Phone Download**: Download uploaded files on mobile and verify file integrity.
 - **Tab Switching**: Switch tabs mid-upload, wait 1 minute, return, verify seamless resume.
@@ -320,14 +321,7 @@ The following client workflows can be verified across devices on your local netw
 
 ---
 
-## 13. Known Limitations & Operating Realities
-
-- **Browser File Handle Security**: Browsers do not permit JavaScript to retain direct file system handles across hard page reloads. When reloading during an upload, QuickShare displays the interrupted session notification, prompting the user to re-select the matching file to instantly resume from the exact missing chunk.
-- **Operating System Background Throttling**: Mobile operating systems (iOS/Android) and desktop browsers throttle JavaScript timers and background network bandwidth when a tab is minimized or phone screen is locked. QuickShare adapts gracefully using promise queues and exponential backoff, resuming automatically when the tab becomes active.
-
----
-
-## 14. Production Deployment Notes
+## 13. Production Deployment Notes
 
 For production environments, run QuickShare behind a WSGI server:
 
@@ -343,7 +337,7 @@ waitress-serve --port=5000 Quickshare:app
 
 ---
 
-## 15. Quick Start
+## 14. Quick Start
 
 1. **Install dependencies**:
    ```powershell
@@ -354,4 +348,4 @@ waitress-serve --port=5000 Quickshare:app
    python Quickshare.py
    ```
 3. **Open browser**:
-   Navigate to `http://localhost:5000` or scan the QR code from your mobile device!
+   Navigate to `http://localhost:5000` or scan the QR code from your mobile device.
