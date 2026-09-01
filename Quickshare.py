@@ -11,6 +11,7 @@ import math
 import socket
 import logging
 import threading
+import zipfile
 from contextlib import contextmanager
 from datetime import datetime
 from flask import Flask, request, send_from_directory, render_template_string, jsonify, abort, Response
@@ -182,13 +183,21 @@ def format_bytes(size_bytes):
     s = round(size_bytes / p, 2)
     return f"{s} {units[i]}"
 
-def get_file_type_info(filename):
+def get_file_type_info(filename, is_folder=False):
     """
     Unified Single Source of Truth for File Type Detection:
-    Returns (category, label, badge_class, icon) based on filename extension.
-    Categories: 'images', 'videos', 'audio', 'documents', 'archives', 'code', 'applications', 'other'.
+    Returns (category, label, badge_class, icon) based on filename extension or folder flag.
+    Categories: 'folders', 'images', 'videos', 'audio', 'documents', 'archives', 'code', 'applications', 'other'.
     Handles case-insensitivity, multiple dots, and files without extensions.
     """
+    if is_folder:
+        return {
+            "category": "folders",
+            "label": "Folder",
+            "badge_class": "file-folder",
+            "icon": "folder"
+        }
+
     if not filename:
         return {
             "category": "other",
@@ -249,74 +258,69 @@ def get_file_type_info(filename):
         
         # Documents (PDF, Office, Text, Markdown)
         "pdf": ("documents", "PDF Document", "file-pdf", "pdf"),
-        "txt": ("documents", "Plain Text", "file-text", "text"),
-        "md": ("documents", "Markdown Document", "file-text", "text"),
-        "markdown": ("documents", "Markdown Document", "file-text", "text"),
-        "log": ("documents", "Log File", "file-text", "text"),
-        "rtf": ("documents", "Rich Text Document", "file-text", "text"),
         "doc": ("documents", "Word Document", "file-doc", "doc"),
         "docx": ("documents", "Word Document", "file-doc", "doc"),
-        "odt": ("documents", "OpenDocument Text", "file-doc", "doc"),
         "xls": ("documents", "Excel Spreadsheet", "file-sheet", "sheet"),
         "xlsx": ("documents", "Excel Spreadsheet", "file-sheet", "sheet"),
-        "csv": ("documents", "CSV Spreadsheet", "file-sheet", "sheet"),
-        "ods": ("documents", "OpenDocument Spreadsheet", "file-sheet", "sheet"),
         "ppt": ("documents", "PowerPoint Presentation", "file-pres", "pres"),
         "pptx": ("documents", "PowerPoint Presentation", "file-pres", "pres"),
-        "odp": ("documents", "OpenDocument Presentation", "file-pres", "pres"),
+        "txt": ("documents", "Plain Text", "file-text", "text"),
+        "md": ("documents", "Markdown Document", "file-text", "text"),
+        "rtf": ("documents", "Rich Text", "file-text", "text"),
+        "csv": ("documents", "CSV Spreadsheet", "file-sheet", "sheet"),
         
         # Archives
         "zip": ("archives", "ZIP Archive", "file-archive", "archive"),
-        "rar": ("archives", "RAR Archive", "file-archive", "archive"),
-        "7z": ("archives", "7Z Archive", "file-archive", "archive"),
         "tar": ("archives", "TAR Archive", "file-archive", "archive"),
         "gz": ("archives", "GZ Archive", "file-archive", "archive"),
+        "tar.gz": ("archives", "TAR.GZ Archive", "file-archive", "archive"),
         "bz2": ("archives", "BZ2 Archive", "file-archive", "archive"),
+        "tar.bz2": ("archives", "TAR.BZ2 Archive", "file-archive", "archive"),
         "xz": ("archives", "XZ Archive", "file-archive", "archive"),
-        "tar.gz": ("archives", "Tarball Archive", "file-archive", "archive"),
-        "tar.bz2": ("archives", "Tarball Archive", "file-archive", "archive"),
-        "tar.xz": ("archives", "Tarball Archive", "file-archive", "archive"),
+        "tar.xz": ("archives", "TAR.XZ Archive", "file-archive", "archive"),
+        "7z": ("archives", "7Z Archive", "file-archive", "archive"),
+        "rar": ("archives", "RAR Archive", "file-archive", "archive"),
+        "iso": ("archives", "ISO Disk Image", "file-archive", "archive"),
         
         # Code & Scripts
         "py": ("code", "Python Script", "file-code", "code"),
-        "js": ("code", "JavaScript Source", "file-code", "code"),
-        "jsx": ("code", "React JSX Source", "file-code", "code"),
-        "ts": ("code", "TypeScript Source", "file-code", "code"),
-        "tsx": ("code", "React TSX Source", "file-code", "code"),
+        "js": ("code", "JavaScript File", "file-code", "code"),
+        "ts": ("code", "TypeScript File", "file-code", "code"),
         "html": ("code", "HTML Document", "file-code", "code"),
         "htm": ("code", "HTML Document", "file-code", "code"),
         "css": ("code", "CSS Stylesheet", "file-code", "code"),
-        "java": ("code", "Java Source", "file-code", "code"),
-        "cpp": ("code", "C++ Source", "file-code", "code"),
+        "scss": ("code", "Sass Stylesheet", "file-code", "code"),
+        "json": ("code", "JSON Data", "file-code", "code"),
         "c": ("code", "C Source", "file-code", "code"),
-        "h": ("code", "C/C++ Header", "file-code", "code"),
+        "cpp": ("code", "C++ Source", "file-code", "code"),
+        "h": ("code", "C Header", "file-code", "code"),
         "hpp": ("code", "C++ Header", "file-code", "code"),
+        "cs": ("code", "C# Source", "file-code", "code"),
+        "java": ("code", "Java Source", "file-code", "code"),
         "go": ("code", "Go Source", "file-code", "code"),
         "rs": ("code", "Rust Source", "file-code", "code"),
         "php": ("code", "PHP Script", "file-code", "code"),
-        "rb": ("code", "Ruby Script", "file-code", "code"),
         "sh": ("code", "Shell Script", "file-code", "code"),
-        "bat": ("code", "Batch Script", "file-code", "code"),
+        "bash": ("code", "Bash Script", "file-code", "code"),
         "ps1": ("code", "PowerShell Script", "file-code", "code"),
-        "json": ("code", "JSON File", "file-code", "code"),
+        "sql": ("code", "SQL Database Script", "file-code", "code"),
         "xml": ("code", "XML File", "file-code", "code"),
         "yaml": ("code", "YAML File", "file-code", "code"),
         "yml": ("code", "YAML File", "file-code", "code"),
-        "sql": ("code", "SQL Database Script", "file-code", "code"),
         
         # Applications / Executables
         "exe": ("applications", "Application · EXE", "file-exe", "exe"),
         "msi": ("applications", "Windows Installer", "file-exe", "exe"),
         "apk": ("applications", "Android Package", "file-exe", "exe"),
         "dmg": ("applications", "macOS Disk Image", "file-exe", "exe"),
+        "pkg": ("applications", "macOS Package", "file-exe", "exe"),
         "deb": ("applications", "Debian Package", "file-exe", "exe"),
-        "rpm": ("applications", "RPM Package", "file-exe", "exe"),
-        "app": ("applications", "macOS Application", "file-exe", "exe"),
+        "rpm": ("applications", "RedHat Package", "file-exe", "exe"),
+        "appimage": ("applications", "AppImage", "file-exe", "exe"),
         
-        # Design / Other
+        # Other specialized
         "psd": ("other", "Photoshop Document", "file-design", "design"),
         "ai": ("other", "Illustrator Artwork", "file-design", "design"),
-        "sketch": ("other", "Sketch Design", "file-design", "design"),
         "fig": ("other", "Figma Design", "file-design", "design"),
     }
 
@@ -360,6 +364,33 @@ def sanitize_filename(filename):
         safe_name = f"file_{uuid.uuid4().hex[:8]}{safe_ext}"
     return safe_name
 
+def sanitize_relative_path(rel_path):
+    """
+    Sanitizes a relative path inside a folder, preventing path traversal and normalization escapes.
+    Example: 'src/utils/config.py' -> 'src/utils/config.py'.
+    Rejects empty segments, null bytes, '.', '..', and leading/trailing slashes.
+    """
+    if not rel_path:
+        return ""
+    clean = rel_path.replace('\\', '/').strip('/')
+    parts = [p for p in clean.split('/') if p and p not in ('.', '..')]
+    safe_parts = []
+    for p in parts:
+        sp = secure_filename(p)
+        if sp:
+            safe_parts.append(sp)
+    return "/".join(safe_parts)
+
+def sanitize_folder_name(name):
+    """Sanitizes folder name safely."""
+    if not name:
+        return f"folder_{uuid.uuid4().hex[:8]}"
+    clean = os.path.basename(name).strip()
+    safe = secure_filename(clean)
+    if not safe:
+        safe = f"folder_{uuid.uuid4().hex[:8]}"
+    return safe
+
 def get_unique_filename(destination_dir, filename):
     """Generate a non-colliding filename if a file with the same name already exists."""
     safe_name = sanitize_filename(filename)
@@ -376,6 +407,34 @@ def get_unique_filename(destination_dir, filename):
             return candidate
         counter += 1
 
+def get_unique_folder_name(destination_dir, folder_name):
+    """Generate a non-colliding folder name if a folder with the same name already exists."""
+    safe = sanitize_folder_name(folder_name)
+    target = os.path.join(destination_dir, safe)
+    if not os.path.exists(target):
+        return safe
+    counter = 1
+    while True:
+        candidate = f"{safe} ({counter})"
+        if not os.path.exists(os.path.join(destination_dir, candidate)):
+            return candidate
+        counter += 1
+
+def get_folder_stats(folder_path):
+    """Calculates total size (bytes) and file count of a directory recursively."""
+    total_size = 0
+    file_count = 0
+    try:
+        for root, dirs, files in os.walk(folder_path):
+            for f in files:
+                fp = os.path.join(root, f)
+                if os.path.isfile(fp) and not f.startswith('.'):
+                    total_size += os.path.getsize(fp)
+                    file_count += 1
+    except Exception:
+        pass
+    return total_size, file_count
+
 def get_upload_cache_dir(upload_id):
     """Get absolute path to an upload's cache directory with strict path containment check."""
     if not is_valid_uuid(upload_id):
@@ -385,9 +444,25 @@ def get_upload_cache_dir(upload_id):
         return None
     return cache_path
 
+def get_folder_cache_dir(folder_id):
+    """Get absolute path to a folder upload's cache directory with path containment check."""
+    if not is_valid_uuid(folder_id):
+        return None
+    cache_path = os.path.join(CACHE_DIR, f"folder_{folder_id}")
+    if not is_safe_path(CACHE_DIR, cache_path):
+        return None
+    return cache_path
+
 def get_metadata_path(upload_id):
     """Get path to metadata.json for an upload."""
     cache_dir = get_upload_cache_dir(upload_id)
+    if not cache_dir:
+        return None
+    return os.path.join(cache_dir, "metadata.json")
+
+def get_folder_metadata_path(folder_id):
+    """Get path to metadata.json for a folder upload."""
+    cache_dir = get_folder_cache_dir(folder_id)
     if not cache_dir:
         return None
     return os.path.join(cache_dir, "metadata.json")
@@ -419,6 +494,24 @@ def load_metadata(upload_id):
             return data
     except Exception as e:
         logger.error(f"Error reading metadata for upload_id={upload_id}: {e}")
+        return None
+
+def load_folder_metadata(folder_id):
+    """Safely load metadata.json for a folder upload session."""
+    cached = upload_lock_manager.get_cached_meta(f"folder_{folder_id}")
+    if cached is not None:
+        return cached
+
+    meta_path = get_folder_metadata_path(folder_id)
+    if not meta_path or not os.path.exists(meta_path):
+        return None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            upload_lock_manager.set_cached_meta(f"folder_{folder_id}", data)
+            return data
+    except Exception as e:
+        logger.error(f"Error reading folder metadata for folder_id={folder_id}: {e}")
         return None
 
 def save_metadata(upload_id, metadata, write_disk=True):
@@ -454,9 +547,35 @@ def save_metadata(upload_id, metadata, write_disk=True):
                 pass
         return False
 
+def save_folder_metadata(folder_id, metadata, write_disk=True):
+    """Save folder metadata to in-memory state and atomically write to disk."""
+    upload_lock_manager.set_cached_meta(f"folder_{folder_id}", metadata)
+    if not write_disk:
+        return True
+
+    meta_path = get_folder_metadata_path(folder_id)
+    if not meta_path:
+        return False
+    tmp_path = f"{meta_path}.tmp_{uuid.uuid4().hex[:6]}"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+            f.flush()
+            
+        os.replace(tmp_path, meta_path)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving folder metadata for folder_id={folder_id}: {e}")
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        return False
+
 def clean_expired_cache():
     """
-    Scans cache directory and cleans up abandoned uploads safely with lock.
+    Scans cache directory and cleans up abandoned file and folder uploads safely with lock.
     Assembling uploads are strictly protected from ordinary cleanup to prevent deleting active multi-GB assembly.
     """
     if not os.path.exists(CACHE_DIR):
@@ -465,38 +584,53 @@ def clean_expired_cache():
     count_cleaned = 0
     try:
         for entry in os.listdir(CACHE_DIR):
-            if not is_valid_uuid(entry):
-                continue
             item_path = os.path.join(CACHE_DIR, entry)
             if not os.path.isdir(item_path):
                 continue
             
-            with upload_lock_manager.acquire(entry):
-                meta = load_metadata(entry)
-                last_activity = None
-                status = "unknown"
-                if meta:
-                    last_activity = meta.get("updated_at")
-                    status = meta.get("status", "unknown")
-                
-                # Rule: Assembling uploads are strictly protected from normal cache cleanup
-                if status == "assembling":
+            if entry.startswith("folder_"):
+                folder_id = entry[7:]
+                if not is_valid_uuid(folder_id):
                     continue
-
-                if last_activity is None:
-                    try:
-                        last_activity = os.path.getmtime(item_path)
-                    except OSError:
+                with upload_lock_manager.acquire(f"folder_{folder_id}"):
+                    meta = load_folder_metadata(folder_id)
+                    status = meta.get("status", "unknown") if meta else "unknown"
+                    if status == "assembling":
                         continue
-
-                if now - last_activity > UPLOAD_CACHE_TIMEOUT:
-                    logger.info(f"UPLOAD EXPIRED: upload_id={entry} inactive for {int(now - last_activity)}s. Deleting cache.")
-                    upload_lock_manager.remove_cached_meta(entry)
-                    try:
-                        shutil.rmtree(item_path, ignore_errors=True)
-                        count_cleaned += 1
-                    except Exception as err:
-                        logger.error(f"Failed to remove expired cache for {entry}: {err}")
+                    last_activity = meta.get("updated_at") if meta else None
+                    if last_activity is None:
+                        try:
+                            last_activity = os.path.getmtime(item_path)
+                        except OSError:
+                            continue
+                    if now - last_activity > UPLOAD_CACHE_TIMEOUT:
+                        logger.info(f"FOLDER CACHE EXPIRED: folder_id={folder_id}. Deleting cache.")
+                        upload_lock_manager.remove_cached_meta(f"folder_{folder_id}")
+                        try:
+                            shutil.rmtree(item_path, ignore_errors=True)
+                            count_cleaned += 1
+                        except Exception as err:
+                            logger.error(f"Failed to remove expired folder cache for {entry}: {err}")
+            elif is_valid_uuid(entry):
+                with upload_lock_manager.acquire(entry):
+                    meta = load_metadata(entry)
+                    status = meta.get("status", "unknown") if meta else "unknown"
+                    if status == "assembling":
+                        continue
+                    last_activity = meta.get("updated_at") if meta else None
+                    if last_activity is None:
+                        try:
+                            last_activity = os.path.getmtime(item_path)
+                        except OSError:
+                            continue
+                    if now - last_activity > UPLOAD_CACHE_TIMEOUT:
+                        logger.info(f"UPLOAD EXPIRED: upload_id={entry} inactive for {int(now - last_activity)}s. Deleting cache.")
+                        upload_lock_manager.remove_cached_meta(entry)
+                        try:
+                            shutil.rmtree(item_path, ignore_errors=True)
+                            count_cleaned += 1
+                        except Exception as err:
+                            logger.error(f"Failed to remove expired cache for {entry}: {err}")
                         
         if count_cleaned > 0:
             logger.info(f"CACHE CLEANED: Removed {count_cleaned} expired upload cache(s).")
@@ -812,6 +946,17 @@ UPLOAD_HTML = """
             border-color: var(--accent-hover);
         }
 
+        .btn-outline {
+            background: transparent;
+            color: var(--text-primary);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .btn-outline:hover, .btn-outline:focus-visible {
+            background: var(--bg-surface-hover);
+            border-color: var(--border-strong);
+        }
+
         .btn-danger {
             background: rgba(239, 68, 68, 0.1);
             color: #f87171;
@@ -821,6 +966,17 @@ UPLOAD_HTML = """
         .btn-danger:hover, .btn-danger:focus-visible {
             background: rgba(239, 68, 68, 0.2);
             border-color: rgba(239, 68, 68, 0.4);
+        }
+
+        .btn-danger-outline {
+            background: transparent;
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.25);
+        }
+
+        .btn-danger-outline:hover, .btn-danger-outline:focus-visible {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.45);
         }
 
         .btn-sm {
@@ -1203,7 +1359,154 @@ UPLOAD_HTML = """
         .file-icon-box.file-sheet { background: rgba(16, 185, 129, 0.12); color: #34d399; border-color: rgba(16, 185, 129, 0.25); }
         .file-icon-box.file-pres { background: rgba(249, 115, 22, 0.12); color: #fb923c; border-color: rgba(249, 115, 22, 0.25); }
         .file-icon-box.file-design { background: rgba(236, 72, 153, 0.12); color: #f472b6; border-color: rgba(236, 72, 153, 0.25); }
+        .file-icon-box.file-folder { background: rgba(59, 130, 246, 0.12); color: #60a5fa; border-color: rgba(59, 130, 246, 0.25); }
         .file-icon-box.file-generic { background: rgba(100, 116, 139, 0.12); color: #94a3b8; border-color: rgba(100, 116, 139, 0.2); }
+
+        /* Folder Card Expandable Subfiles */
+        .folder-subfiles-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            background: var(--bg-surface-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem;
+            max-height: 180px;
+            overflow-y: auto;
+            margin-top: 0.25rem;
+        }
+
+        .folder-subfile-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.76rem;
+            color: var(--text-secondary);
+            padding: 0.3rem 0.45rem;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.02);
+            gap: 0.5rem;
+        }
+
+        .folder-subfile-name {
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 65%;
+        }
+
+        /* Folder Explorer Modal */
+        .folder-explorer-dialog {
+            width: 100%;
+            max-width: 720px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            padding: 1.25rem 1.25rem 1rem;
+        }
+
+        .folder-breadcrumbs {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.4rem 0;
+            overflow-x: auto;
+            white-space: nowrap;
+            font-size: 0.82rem;
+            font-family: var(--font-mono);
+            border-bottom: 1px solid var(--border-subtle);
+            margin-bottom: 0.75rem;
+            scrollbar-width: none;
+        }
+
+        .folder-breadcrumbs::-webkit-scrollbar { display: none; }
+
+        .breadcrumb-crumb {
+            color: var(--accent-text);
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.2rem 0.35rem;
+            border-radius: 4px;
+            transition: var(--transition-smooth);
+        }
+
+        .breadcrumb-crumb:hover {
+            background: var(--accent-subtle);
+            text-decoration: none;
+        }
+
+        .breadcrumb-crumb.active {
+            color: var(--text-primary);
+            cursor: default;
+            font-weight: 600;
+            background: transparent;
+        }
+
+        .breadcrumb-sep {
+            color: var(--text-tertiary);
+            user-select: none;
+        }
+
+        .folder-explorer-body {
+            overflow-y: auto;
+            flex: 1 1 auto;
+            max-height: calc(85vh - 200px);
+            display: flex;
+            flex-direction: column;
+            gap: 0.45rem;
+            padding-right: 0.25rem;
+        }
+
+        .folder-explorer-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.55rem 0.75rem;
+            background: var(--bg-surface-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            gap: 0.75rem;
+            transition: var(--transition-smooth);
+        }
+
+        .folder-explorer-item:hover {
+            background: var(--bg-surface-hover);
+            border-color: var(--border-strong);
+        }
+
+        .folder-item-left {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+
+        .folder-item-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.12rem;
+            min-width: 0;
+        }
+
+        .folder-item-name {
+            font-size: 0.84rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .folder-item-meta {
+            font-size: 0.74rem;
+            color: var(--text-secondary);
+        }
 
         .file-title-group {
             display: flex;
@@ -1540,7 +1843,7 @@ UPLOAD_HTML = """
             <h2 class="section-title" id="uploadSectionHeading">Share Files</h2>
         </div>
 
-        <div class="dropzone-container" id="dropzone" tabindex="0" role="button" aria-label="File drop area. Drop files to share or click to browse" onclick="document.getElementById('fileInput').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('fileInput').click();}">
+        <div class="dropzone-container" id="dropzone" tabindex="0" role="button" aria-label="File drop area. Drop files or folders to share" onclick="document.getElementById('fileInput').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('fileInput').click();}">
             <div class="dropzone-icon-box">
                 <svg class="svg-icon" style="width: 20px; height: 20px;" viewBox="0 0 24 24">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
@@ -1548,13 +1851,17 @@ UPLOAD_HTML = """
             </div>
             <div class="dropzone-text-group">
                 <div class="dropzone-title">
-                    <span class="desktop-text">Drop files here to share</span>
-                    <span class="mobile-text">Select files to share</span>
+                    <span class="desktop-text">Drop files or folders here to share</span>
+                    <span class="mobile-text">Select files or folders to share</span>
                 </div>
-                <div class="dropzone-subtitle">Chunked · Resumable · End-to-end verified</div>
+                <div class="dropzone-subtitle">Chunked · Resumable · Folder Structure Preserved</div>
             </div>
-            <button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation(); document.getElementById('fileInput').click()">Browse files</button>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; z-index: 2;" onclick="event.stopPropagation()">
+                <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('fileInput').click()">Browse files</button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="triggerFolderInput()">Browse folder</button>
+            </div>
             <input type="file" id="fileInput" class="file-input" multiple onchange="handleFileSelection(event)">
+            <input type="file" id="folderInput" class="file-input" webkitdirectory directory multiple onchange="handleFolderSelection(event)">
         </div>
 
         <div class="transfer-list" id="uploadQueue" style="margin-top: 1rem;" aria-live="polite"></div>
@@ -1575,13 +1882,14 @@ UPLOAD_HTML = """
                             <circle cx="11" cy="11" r="8"></circle>
                             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                         </svg>
-                        <input type="search" id="fileSearch" class="search-input" placeholder="Search files..." aria-label="Search available files" oninput="applyFilters()">
+                        <input type="search" id="fileSearch" class="search-input" placeholder="Search files and folders..." aria-label="Search available files" oninput="applyFilters()">
                     </div>
                 </div>
 
                 <div class="filter-scroll-wrapper">
                     <div class="filter-pills-bar" id="filterPillsBar" role="tablist" aria-label="File Category Filters" onscroll="updateFilterScrollIndicator()">
                         <button class="filter-pill active" data-category="all" aria-pressed="true" onclick="setCategoryFilter('all', this)">All</button>
+                        <button class="filter-pill" data-category="folders" aria-pressed="false" onclick="setCategoryFilter('folders', this)">Folders</button>
                         <button class="filter-pill" data-category="images" aria-pressed="false" onclick="setCategoryFilter('images', this)">Images</button>
                         <button class="filter-pill" data-category="videos" aria-pressed="false" onclick="setCategoryFilter('videos', this)">Videos</button>
                         <button class="filter-pill" data-category="audio" aria-pressed="false" onclick="setCategoryFilter('audio', this)">Audio</button>
@@ -1596,7 +1904,7 @@ UPLOAD_HTML = """
             </div>
 
             <div id="noFilterMatches" class="empty-state" style="display: none;">
-                <div class="empty-state-title" id="emptyStateTitle">No matching files</div>
+                <div class="empty-state-title" id="emptyStateTitle">No matching items</div>
                 <div class="empty-state-subtitle" id="emptyStateSubtitle">Try another search query or file category.</div>
             </div>
 
@@ -1606,7 +1914,7 @@ UPLOAD_HTML = """
                         <th scope="col">Name</th>
                         <th scope="col" class="desktop-only-col" style="width: 100px;">Size</th>
                         <th scope="col" class="desktop-only-col" style="width: 120px;">Added</th>
-                        <th scope="col" style="width: 120px; text-align: right;">Action</th>
+                        <th scope="col" style="width: 180px; text-align: right;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1615,7 +1923,9 @@ UPLOAD_HTML = """
                         <td>
                             <div class="file-name-cell">
                                 <div class="file-icon-box {{ f.type_info.badge_class }}" aria-hidden="true">
-                                    {% if f.type_info.icon == 'video' %}
+                                    {% if f.is_folder %}
+                                        <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                                    {% elif f.type_info.icon == 'video' %}
                                         <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                                     {% elif f.type_info.icon == 'audio' %}
                                         <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
@@ -1644,20 +1954,33 @@ UPLOAD_HTML = """
                                     {% endif %}
                                 </div>
                                 <div class="file-title-group">
-                                    <span class="file-name-text" title="{{ f.name }}">{{ f.name }}</span>
-                                    <span class="file-type-subtext">{{ f.type_info.label }} · {{ f.size_str }} · {{ f.mtime_str }}</span>
+                                    <span class="file-name-text" title="{{ f.name }}">{{ f.name }}{% if f.is_folder %}/{% endif %}</span>
+                                    <span class="file-type-subtext">{% if f.is_folder %}Folder · {{ f.size_str }} · {{ f.file_count }} files · {{ f.mtime_str }}{% else %}{{ f.type_info.label }} · {{ f.size_str }} · {{ f.mtime_str }}{% endif %}</span>
                                 </div>
                             </div>
                         </td>
                         <td class="file-size-cell desktop-only-col">{{ f.size_str }}</td>
                         <td class="file-date-cell desktop-only-col">{{ f.mtime_str }}</td>
                         <td style="text-align: right;">
-                            <a href="/download/{{ f.name }}" class="btn btn-sm" download aria-label="Download {{ f.name }}">
+                            {% if f.is_folder %}
+                            <div style="display: flex; gap: 0.4rem; justify-content: flex-end; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-sm btn-primary" onclick="openFolderModal('{{ f.name|e }}')" aria-label="Open folder {{ f.name }}">
+                                    <svg class="svg-icon" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                                    <span>Open</span>
+                                </button>
+                                <a href="/download/zip/{{ f.name|e }}" class="btn btn-sm btn-outline" download aria-label="Download ZIP of {{ f.name }}">
+                                    <svg class="svg-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                                    <span>ZIP</span>
+                                </a>
+                            </div>
+                            {% else %}
+                            <a href="/download/{{ f.name|e }}" class="btn btn-sm" download aria-label="Download {{ f.name }}">
                                 <svg class="svg-icon" viewBox="0 0 24 24">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
                                 </svg>
                                 <span>Download</span>
                             </a>
+                            {% endif %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -1712,6 +2035,44 @@ UPLOAD_HTML = """
         <div class="modal-footer-note">
             Devices must be connected to the same local network.
         </div>
+    </div>
+</div>
+
+<!-- Interactive Folder Explorer Modal -->
+<div class="modal-overlay" id="folderModal" onclick="closeFolderModal(event)">
+    <div class="modal-dialog folder-explorer-dialog" onclick="event.stopPropagation()">
+        <div class="modal-header" style="width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; min-width: 0;">
+                <div class="file-icon-box file-folder" style="width: 30px; height: 30px;">
+                    <svg viewBox="0 0 24 24" style="width: 15px; height: 15px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <span class="modal-title" id="folderModalTitle" style="font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Folder Explorer</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0;">
+                <a id="folderModalZipBtn" href="#" class="btn btn-sm btn-primary" download>
+                    <svg class="svg-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                    <span>Download ZIP</span>
+                </a>
+                <button class="btn btn-icon-only" onclick="closeFolderModal()" aria-label="Close folder dialog">
+                    <svg class="svg-icon" viewBox="0 0 24 24">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="folder-breadcrumbs" id="folderBreadcrumbs" style="width: 100%;"></div>
+
+        <div class="search-box" style="width: 100%; margin-bottom: 0.75rem;">
+            <svg class="search-icon svg-icon" viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="search" id="folderSearchInput" class="search-input" placeholder="Search in folder..." aria-label="Search inside current folder" oninput="filterFolderModalContents()">
+        </div>
+
+        <div class="folder-explorer-body" id="folderExplorerList" style="width: 100%;"></div>
     </div>
 </div>
 
@@ -1991,10 +2352,11 @@ function resumeSessionFile(event, uploadId) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Unified Chunked Uploader Implementation (High Throughput & Optimized UI)
 // ---------------------------------------------------------------------------
 class ChunkedUploader {
-    constructor(file, existingUploadId = null) {
+    constructor(file, existingUploadId = null, folderId = null, relativePath = null, onProgress = null, onComplete = null) {
         this.file = file;
         this.filename = file.name;
         this.totalSize = file.size;
@@ -2002,6 +2364,10 @@ class ChunkedUploader {
         this.chunkSize = CHUNK_SIZE;
         this.totalChunks = Math.ceil(this.totalSize / this.chunkSize) || 1;
         this.uploadId = existingUploadId;
+        this.folderId = folderId;
+        this.relativePath = relativePath || file.name;
+        this.onProgress = onProgress;
+        this.onComplete = onComplete;
         
         this.receivedChunks = new Set();
         this.status = 'queued'; // queued, uploading, paused, assembling, completed, cancelled, error
@@ -2025,10 +2391,14 @@ class ChunkedUploader {
         // Unique DOM card ID per job
         this.elementId = 'upload-' + (this.uploadId || 'job-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36));
 
-        this.renderCard();
+        // Only render standalone transfer card if not part of a folder
+        if (!this.folderId) {
+            this.renderCard();
+        }
     }
 
     renderCard() {
+        if (this.folderId) return;
         const queue = document.getElementById("uploadQueue");
         let card = document.getElementById(this.elementId);
         if (!card) {
@@ -2070,6 +2440,12 @@ class ChunkedUploader {
     }
 
     updateUI() {
+        if (this.onProgress) {
+            this.onProgress(this);
+        }
+
+        if (this.folderId) return;
+
         const card = document.getElementById(this.elementId);
         if (!card) return;
 
@@ -2181,14 +2557,20 @@ class ChunkedUploader {
         try {
             // Step 1: Initialize or Reconnect upload session
             if (!this.uploadId) {
+                const payload = {
+                    filename: this.filename,
+                    total_size: this.totalSize,
+                    chunk_size: this.chunkSize
+                };
+                if (this.folderId) {
+                    payload.folder_id = this.folderId;
+                    payload.relative_path = this.relativePath;
+                }
+
                 const startRes = await fetch('/upload/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        filename: this.filename,
-                        total_size: this.totalSize,
-                        chunk_size: this.chunkSize
-                    })
+                    body: JSON.stringify(payload)
                 });
                 
                 const startData = await startRes.json();
@@ -2215,15 +2597,17 @@ class ChunkedUploader {
                 }
             }
 
-            // Save session to localStorage
-            saveUploadSession(this.uploadId, {
-                upload_id: this.uploadId,
-                filename: this.filename,
-                total_size: this.totalSize,
-                chunk_size: this.chunkSize,
-                total_chunks: this.totalChunks,
-                last_modified: this.lastModified
-            });
+            // Save standalone session to localStorage
+            if (!this.folderId) {
+                saveUploadSession(this.uploadId, {
+                    upload_id: this.uploadId,
+                    filename: this.filename,
+                    total_size: this.totalSize,
+                    chunk_size: this.chunkSize,
+                    total_chunks: this.totalChunks,
+                    last_modified: this.lastModified
+                });
+            }
 
             this.updateUI();
 
@@ -2249,10 +2633,16 @@ class ChunkedUploader {
                 }
 
                 this.status = 'completed';
-                removeUploadSession(this.uploadId);
+                if (!this.folderId) {
+                    removeUploadSession(this.uploadId);
+                    showToast(`Uploaded: ${this.filename}`);
+                    checkAllUploadsFinished();
+                }
                 this.updateUI();
-                showToast(`Uploaded: ${this.filename}`);
-                checkAllUploadsFinished();
+
+                if (this.onComplete) {
+                    this.onComplete(this);
+                }
             }
 
         } catch (err) {
@@ -2284,7 +2674,7 @@ class ChunkedUploader {
                 const errData = await statusRes.json().catch(() => ({}));
                 this.status = 'error';
                 this.errorMessage = errData.error || "Upload session expired or not found on server";
-                removeUploadSession(this.uploadId);
+                if (!this.folderId) removeUploadSession(this.uploadId);
                 this.updateUI();
                 return;
             }
@@ -2293,7 +2683,7 @@ class ChunkedUploader {
             if (!statusData.success) {
                 this.status = 'error';
                 this.errorMessage = statusData.error || "Upload session not found";
-                removeUploadSession(this.uploadId);
+                if (!this.folderId) removeUploadSession(this.uploadId);
                 this.updateUI();
                 return;
             }
@@ -2311,9 +2701,12 @@ class ChunkedUploader {
 
             if (statusData.status === 'completed') {
                 this.status = 'completed';
-                removeUploadSession(this.uploadId);
+                if (!this.folderId) {
+                    removeUploadSession(this.uploadId);
+                    checkAllUploadsFinished();
+                }
                 this.updateUI();
-                checkAllUploadsFinished();
+                if (this.onComplete) this.onComplete(this);
                 return;
             }
 
@@ -2329,10 +2722,13 @@ class ChunkedUploader {
                 const completeData = await completeRes.json();
                 if (completeData.success) {
                     this.status = 'completed';
-                    removeUploadSession(this.uploadId);
+                    if (!this.folderId) {
+                        removeUploadSession(this.uploadId);
+                        showToast(`Uploaded: ${this.filename}`);
+                        checkAllUploadsFinished();
+                    }
                     this.updateUI();
-                    showToast(`Uploaded: ${this.filename}`);
-                    checkAllUploadsFinished();
+                    if (this.onComplete) this.onComplete(this);
                 } else {
                     this.status = 'error';
                     this.errorMessage = completeData.error || "Assembly failed";
@@ -2362,10 +2758,13 @@ class ChunkedUploader {
                     const completeData = await completeRes.json();
                     if (completeData.success) {
                         this.status = 'completed';
-                        removeUploadSession(this.uploadId);
+                        if (!this.folderId) {
+                            removeUploadSession(this.uploadId);
+                            showToast(`Uploaded: ${this.filename}`);
+                            checkAllUploadsFinished();
+                        }
                         this.updateUI();
-                        showToast(`Uploaded: ${this.filename}`);
-                        checkAllUploadsFinished();
+                        if (this.onComplete) this.onComplete(this);
                     } else {
                         this.status = 'error';
                         this.errorMessage = completeData.error || "Assembly failed";
@@ -2508,7 +2907,7 @@ class ChunkedUploader {
         }
         this.abortControllers.clear();
         this.updateUI();
-        showToast("Transfer paused");
+        if (!this.folderId) showToast("Transfer paused");
         processUploadQueue();
     }
 
@@ -2517,7 +2916,7 @@ class ChunkedUploader {
         this.status = 'queued';
         this.errorMessage = '';
         this.updateUI();
-        showToast("Resuming transfer");
+        if (!this.folderId) showToast("Resuming transfer");
         processUploadQueue();
     }
 
@@ -2537,18 +2936,360 @@ class ChunkedUploader {
             } catch (e) {
                 console.warn("Failed to notify server of cancellation:", e);
             }
-            removeUploadSession(this.uploadId);
+            if (!this.folderId) removeUploadSession(this.uploadId);
         }
 
         this.updateUI();
-        showToast("Transfer cancelled");
+        if (!this.folderId) {
+            showToast("Transfer cancelled");
+            checkAllUploadsFinished();
+        }
+        processUploadQueue();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Folder Uploader Implementation (Hierarchical Progress & Aggregate Lifecycle)
+// ---------------------------------------------------------------------------
+class FolderUploader {
+    constructor(folderName, filesData) {
+        this.folderName = folderName;
+        this.filesData = filesData; // [{ file, relativePath, size }]
+        this.totalFiles = filesData.length;
+        this.totalSize = filesData.reduce((acc, f) => acc + f.size, 0);
+        
+        this.folderId = null;
+        this.status = 'queued'; // queued, uploading, paused, assembling, completed, cancelled, error
+        this.errorMessage = '';
+        this.isExpanded = false;
+        
+        this.childUploaders = [];
+        this.uploadedBytes = 0;
+        this.currentSpeed = 0;
+        this.bytesSinceLastCheck = 0;
+        this.lastSpeedCheck = Date.now();
+        this.uiUpdatePending = false;
+        
+        this.elementId = 'folder-job-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+        this.renderCard();
+    }
+
+    renderCard() {
+        const queue = document.getElementById("uploadQueue");
+        let card = document.getElementById(this.elementId);
+        if (!card) {
+            card = document.createElement("div");
+            card.className = "transfer-card";
+            card.id = this.elementId;
+            queue.prepend(card);
+        }
+
+        card.innerHTML = `
+            <div class="transfer-header">
+                <div class="transfer-title-group">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div class="file-icon-box file-folder" style="width: 28px; height: 28px;">
+                            <svg viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                        </div>
+                        <div class="transfer-filename" title="${escapeHtml(this.folderName)}">${escapeHtml(this.folderName)}/</div>
+                    </div>
+                    <div class="transfer-meta">${this.totalFiles} files · ${formatBytes(this.totalSize)} · <span id="${this.elementId}-files-count">0/${this.totalFiles} finished</span></div>
+                </div>
+                <div class="transfer-actions">
+                    <span class="status-badge badge-${this.status}" id="${this.elementId}-badge">${this.status.toUpperCase()}</span>
+                    <button class="btn btn-sm btn-outline" onclick="toggleFolderDetails('${this.elementId}')" id="${this.elementId}-toggle-btn">Show files (${this.totalFiles})</button>
+                    <button class="btn btn-sm" id="${this.elementId}-pause-btn" onclick="togglePauseFolder('${this.elementId}')" style="${this.status === 'queued' ? 'display:none;' : ''}">Pause</button>
+                    <button class="btn btn-sm btn-danger" id="${this.elementId}-cancel-btn" onclick="cancelFolder('${this.elementId}')">Cancel</button>
+                </div>
+            </div>
+            <div class="progress-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="${this.elementId}-progress-container">
+                <div class="progress-fill" id="${this.elementId}-fill" style="width: 0%"></div>
+            </div>
+            <div class="transfer-footer">
+                <span id="${this.elementId}-progress-text">0% · 0 B / ${formatBytes(this.totalSize)}</span>
+                <span id="${this.elementId}-speed-text">${this.status === 'queued' ? 'Queued in line...' : '-- MB/s · ETA: --'}</span>
+            </div>
+            <div class="folder-subfiles-list" id="${this.elementId}-subfiles" style="display: none;">
+                ${this.filesData.map((f, idx) => `
+                    <div class="folder-subfile-row" id="${this.elementId}-subfile-${idx}">
+                        <span class="folder-subfile-name" title="${escapeHtml(f.relativePath)}">${escapeHtml(f.relativePath)}</span>
+                        <div style="display: flex; align-items: center; gap: 0.45rem;">
+                            <span>${formatBytes(f.size)}</span>
+                            <span class="status-badge badge-queued" id="${this.elementId}-subfile-badge-${idx}">QUEUED</span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    requestUIUpdate() {
+        if (this.uiUpdatePending) return;
+        this.uiUpdatePending = true;
+        requestAnimationFrame(() => {
+            this.uiUpdatePending = false;
+            this.updateUI();
+        });
+    }
+
+    updateUI() {
+        const card = document.getElementById(this.elementId);
+        if (!card) return;
+
+        const badge = document.getElementById(`${this.elementId}-badge`);
+        const fill = document.getElementById(`${this.elementId}-fill`);
+        const progressContainer = document.getElementById(`${this.elementId}-progress-container`);
+        const progressText = document.getElementById(`${this.elementId}-progress-text`);
+        const speedText = document.getElementById(`${this.elementId}-speed-text`);
+        const filesCountText = document.getElementById(`${this.elementId}-files-count`);
+        const pauseBtn = document.getElementById(`${this.elementId}-pause-btn`);
+        const cancelBtn = document.getElementById(`${this.elementId}-cancel-btn`);
+
+        let completedFiles = 0;
+        let aggregateUploadedBytes = 0;
+        let aggregateSpeed = 0;
+
+        this.childUploaders.forEach((u, idx) => {
+            if (u.status === 'completed') {
+                completedFiles++;
+                aggregateUploadedBytes += u.totalSize;
+            } else {
+                aggregateUploadedBytes += u.uploadedBytes;
+                if (u.status === 'uploading') aggregateSpeed += u.currentSpeed;
+            }
+
+            const subBadge = document.getElementById(`${this.elementId}-subfile-badge-${idx}`);
+            if (subBadge) {
+                subBadge.className = `status-badge badge-${u.status}`;
+                subBadge.textContent = u.status.toUpperCase();
+            }
+        });
+
+        this.uploadedBytes = aggregateUploadedBytes;
+        this.currentSpeed = aggregateSpeed;
+
+        if (filesCountText) {
+            filesCountText.textContent = `${completedFiles}/${this.totalFiles} finished`;
+        }
+
+        let percent = 0;
+        if (this.totalSize > 0) {
+            percent = Math.min(99, Math.round((this.uploadedBytes / this.totalSize) * 100));
+        } else if (completedFiles === this.totalFiles) {
+            percent = 100;
+        }
+
+        if (this.status === 'completed') {
+            percent = 100;
+        }
+
+        if (fill) {
+            fill.style.width = `${percent}%`;
+            if (this.status === 'completed') fill.classList.add('completed');
+        }
+
+        if (progressContainer) {
+            progressContainer.setAttribute('aria-valuenow', percent);
+        }
+
+        if (progressText) {
+            progressText.textContent = `${percent}% · ${formatBytes(this.uploadedBytes)} / ${formatBytes(this.totalSize)}`;
+        }
+
+        if (speedText) {
+            if (this.status === 'queued') {
+                speedText.textContent = `Queued in line...`;
+            } else if (this.status === 'uploading') {
+                const remainingBytes = Math.max(0, this.totalSize - this.uploadedBytes);
+                const etaSeconds = this.currentSpeed > 0 ? (remainingBytes / this.currentSpeed) : 0;
+                speedText.textContent = `${formatBytes(this.currentSpeed)}/s · ${formatTime(etaSeconds)} remaining`;
+            } else if (this.status === 'assembling') {
+                speedText.textContent = `Publishing and verifying folder structure...`;
+            } else if (this.status === 'completed') {
+                speedText.textContent = `Folder uploaded and published`;
+            } else if (this.status === 'cancelled') {
+                speedText.textContent = `Folder transfer cancelled`;
+            } else if (this.status === 'paused') {
+                speedText.textContent = `Folder transfer paused`;
+            } else if (this.status === 'error') {
+                speedText.textContent = `${this.errorMessage || 'Folder transfer failed'}`;
+            }
+        }
+
+        if (badge) {
+            badge.className = `status-badge badge-${this.status}`;
+            badge.textContent = this.status.toUpperCase();
+        }
+
+        if (pauseBtn) {
+            if (this.status === 'completed' || this.status === 'cancelled' || this.status === 'assembling') {
+                pauseBtn.style.display = 'none';
+            } else if (this.status === 'queued') {
+                pauseBtn.style.display = 'none';
+            } else if (this.status === 'error') {
+                pauseBtn.style.display = 'inline-block';
+                pauseBtn.textContent = 'Retry';
+            } else {
+                pauseBtn.style.display = 'inline-block';
+                pauseBtn.textContent = (this.status === 'paused') ? 'Resume' : 'Pause';
+            }
+        }
+
+        if (cancelBtn) {
+            if (this.status === 'completed' || this.status === 'cancelled') {
+                cancelBtn.style.display = 'none';
+            } else {
+                cancelBtn.style.display = 'inline-block';
+            }
+        }
+    }
+
+    toggleDetails() {
+        this.isExpanded = !this.isExpanded;
+        const subfiles = document.getElementById(`${this.elementId}-subfiles`);
+        const toggleBtn = document.getElementById(`${this.elementId}-toggle-btn`);
+        if (subfiles) subfiles.style.display = this.isExpanded ? 'flex' : 'none';
+        if (toggleBtn) toggleBtn.textContent = this.isExpanded ? `Hide files` : `Show files (${this.totalFiles})`;
+    }
+
+    async start() {
+        if (this.status === 'uploading' || this.status === 'assembling' || this.status === 'completed' || this.status === 'cancelled') return;
+        this.status = 'uploading';
+        this.errorMessage = '';
+        this.updateUI();
+
+        try {
+            // Step 1: Initialize folder upload session with server authoritative manifest
+            if (!this.folderId) {
+                const manifest = this.filesData.map(f => ({
+                    relative_path: f.relativePath,
+                    size: f.size
+                }));
+
+                const startRes = await fetch('/folder/upload/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        folder_name: this.folderName,
+                        total_files: this.totalFiles,
+                        total_size: this.totalSize,
+                        files: manifest
+                    })
+                });
+
+                const startData = await startRes.json();
+                if (!startData.success) {
+                    throw new Error(startData.error || "Failed to initialize folder upload session");
+                }
+
+                this.folderId = startData.folder_id;
+            }
+
+            // Step 2: Instantiate ChunkedUploaders for all sub-files
+            this.childUploaders = this.filesData.map(f => {
+                return new ChunkedUploader(
+                    f.file,
+                    null,
+                    this.folderId,
+                    f.relativePath,
+                    () => this.requestUIUpdate(),
+                    (child) => this.onChildComplete(child)
+                );
+            });
+
+            // Enqueue subfiles into main uploadQueue
+            this.childUploaders.forEach(child => {
+                activeUploaders.set(child.elementId, child);
+                uploadQueue.push(child);
+            });
+
+            this.updateUI();
+            processUploadQueue();
+
+        } catch (err) {
+            console.error(`Folder upload error for ${this.folderName}:`, err);
+            this.status = 'error';
+            this.errorMessage = err.message || "Failed to start folder upload";
+            this.updateUI();
+        }
+    }
+
+    async onChildComplete(child) {
+        this.requestUIUpdate();
+        const allCompleted = this.childUploaders.every(u => u.status === 'completed');
+
+        if (allCompleted && this.status !== 'completed' && this.status !== 'assembling') {
+            this.status = 'assembling';
+            this.updateUI();
+
+            try {
+                const compRes = await fetch('/folder/upload/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ folder_id: this.folderId })
+                });
+
+                const compData = await compRes.json();
+                if (!compData.success) {
+                    throw new Error(compData.error || "Failed to finalize folder publish");
+                }
+
+                this.status = 'completed';
+                this.updateUI();
+                showToast(`Folder uploaded: ${this.folderName}`);
+                checkAllUploadsFinished();
+            } catch (err) {
+                console.error(`Error completing folder ${this.folderName}:`, err);
+                this.status = 'error';
+                this.errorMessage = err.message || "Failed to complete folder assembly";
+                this.updateUI();
+            }
+        }
+    }
+
+    pause() {
+        if (this.status !== 'uploading') return;
+        this.status = 'paused';
+        this.childUploaders.forEach(u => {
+            if (u.status === 'uploading') u.pause();
+        });
+        this.updateUI();
+        showToast("Folder upload paused");
+        processUploadQueue();
+    }
+
+    resume() {
+        if (this.status !== 'paused' && this.status !== 'error') return;
+        this.status = 'uploading';
+        this.childUploaders.forEach(u => {
+            if (u.status === 'paused' || u.status === 'error') u.resume();
+        });
+        this.updateUI();
+        showToast("Resuming folder upload");
+        processUploadQueue();
+    }
+
+    async cancel() {
+        this.status = 'cancelled';
+        this.childUploaders.forEach(u => u.cancel());
+
+        if (this.folderId) {
+            try {
+                await fetch(`/folder/upload/cancel/${this.folderId}`, { method: 'POST' });
+            } catch (e) {
+                console.warn("Failed to notify server of folder cancellation:", e);
+            }
+        }
+
+        this.updateUI();
+        showToast("Folder upload cancelled");
         processUploadQueue();
         checkAllUploadsFinished();
     }
 }
 
 // ---------------------------------------------------------------------------
-// Multi-File Queue Manager & UI Event Handlers
+// Multi-File & Folder Queue Manager & UI Event Handlers
 // ---------------------------------------------------------------------------
 const MAX_CONCURRENT_FILES = 2;
 let uploadQueue = [];
@@ -2611,11 +3352,71 @@ function handleFileSelection(event) {
     enqueueFiles(fileArray);
 }
 
-function startChunkedUpload(file, existingUploadId = null) {
-    const uploader = new ChunkedUploader(file, existingUploadId);
-    activeUploaders.set(uploader.elementId, uploader);
-    uploadQueue.push(uploader);
-    processUploadQueue();
+function triggerFolderInput() {
+    const input = document.getElementById('folderInput');
+    if (!input) return;
+    if (input.webkitdirectory === undefined && !('directory' in input)) {
+        showToast("Folder upload is not supported in this browser. Please select files.");
+        document.getElementById('fileInput').click();
+        return;
+    }
+    input.click();
+}
+
+function handleFolderSelection(event) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    const fileArray = Array.from(files);
+    event.target.value = '';
+
+    // Group files by root directory name
+    const folderGroups = new Map();
+    fileArray.forEach(file => {
+        const fullRel = file.webkitRelativePath || file.name;
+        const parts = fullRel.split('/');
+        const folderName = parts.length > 1 ? parts[0] : 'Folder';
+        const innerRel = parts.length > 1 ? parts.slice(1).join('/') : file.name;
+
+        if (!folderGroups.has(folderName)) {
+            folderGroups.set(folderName, []);
+        }
+        folderGroups.get(folderName).push({
+            file: file,
+            relativePath: innerRel,
+            size: file.size
+        });
+    });
+
+    folderGroups.forEach((groupFiles, folderName) => {
+        const folderUploader = new FolderUploader(folderName, groupFiles);
+        activeUploaders.set(folderUploader.elementId, folderUploader);
+        folderUploader.start();
+    });
+}
+
+function toggleFolderDetails(elementId) {
+    const folderUploader = activeUploaders.get(elementId);
+    if (folderUploader && folderUploader.toggleDetails) {
+        folderUploader.toggleDetails();
+    }
+}
+
+function togglePauseFolder(elementId) {
+    const folderUploader = activeUploaders.get(elementId);
+    if (folderUploader) {
+        if (folderUploader.status === 'paused' || folderUploader.status === 'error') {
+            folderUploader.resume();
+        } else if (folderUploader.status === 'uploading') {
+            folderUploader.pause();
+        }
+    }
+}
+
+function cancelFolder(elementId) {
+    const folderUploader = activeUploaders.get(elementId);
+    if (folderUploader) {
+        folderUploader.cancel();
+    }
 }
 
 function cancelUpload(elementId) {
@@ -2636,7 +3437,76 @@ function togglePauseUpload(elementId) {
     }
 }
 
-// Drag & Drop
+// ---------------------------------------------------------------------------
+// Drag & Drop Handling (Files and Recursive Directory Parsing)
+// ---------------------------------------------------------------------------
+async function scanFilesAndDirectories(dataTransfer) {
+    const items = dataTransfer.items;
+    const standaloneFiles = [];
+    const folderGroups = new Map(); // folderName -> [{ file, relativePath, size }]
+
+    if (items && items.length > 0 && (items[0].webkitGetAsEntry || items[0].getAsEntry)) {
+        const entries = [];
+        for (let i = 0; i < items.length; i++) {
+            const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : items[i].getAsEntry();
+            if (entry) entries.push(entry);
+        }
+
+        async function readEntry(entry, currentPath = '') {
+            if (entry.isFile) {
+                return new Promise((resolve) => {
+                    entry.file((file) => {
+                        resolve([{ file, path: currentPath ? `${currentPath}/${file.name}` : file.name }]);
+                    }, () => resolve([]));
+                });
+            } else if (entry.isDirectory) {
+                return new Promise((resolve) => {
+                    const dirReader = entry.createReader();
+                    const allEntries = [];
+                    function readBatch() {
+                        dirReader.readEntries(async (batch) => {
+                            if (!batch.length) {
+                                let collected = [];
+                                for (let subEntry of allEntries) {
+                                    const res = await readEntry(subEntry, currentPath ? `${currentPath}/${entry.name}` : entry.name);
+                                    collected = collected.concat(res);
+                                }
+                                resolve(collected);
+                            } else {
+                                allEntries.push(...batch);
+                                readBatch();
+                            }
+                        }, () => resolve([]));
+                    }
+                    readBatch();
+                });
+            }
+            return [];
+        }
+
+        for (let entry of entries) {
+            if (entry.isDirectory) {
+                const subFiles = await readEntry(entry, '');
+                const folderName = entry.name;
+                const formatted = subFiles.map(item => {
+                    // strip root folder prefix
+                    const parts = item.path.split('/');
+                    const rel = parts.length > 1 ? parts.slice(1).join('/') : item.file.name;
+                    return { file: item.file, relativePath: rel, size: item.file.size };
+                });
+                folderGroups.set(folderName, formatted);
+            } else if (entry.isFile) {
+                const fileItems = await readEntry(entry, '');
+                fileItems.forEach(fi => standaloneFiles.push(fi.file));
+            }
+        }
+    } else if (dataTransfer.files && dataTransfer.files.length > 0) {
+        standaloneFiles.push(...Array.from(dataTransfer.files));
+    }
+
+    return { standaloneFiles, folderGroups };
+}
+
 const dropzone = document.getElementById("dropzone");
 ['dragenter', 'dragover'].forEach(name => {
     dropzone.addEventListener(name, (e) => {
@@ -2654,21 +3524,157 @@ const dropzone = document.getElementById("dropzone");
     });
 });
 
-dropzone.addEventListener('drop', (e) => {
-    const dt = e.dataTransfer;
-    const files = dt.files;
-    if (files && files.length > 0) {
-        const fileArray = Array.from(files);
-        enqueueFiles(fileArray);
+dropzone.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropzone.classList.remove('dragover');
+
+    try {
+        const { standaloneFiles, folderGroups } = await scanFilesAndDirectories(e.dataTransfer);
+        if (standaloneFiles.length > 0) {
+            enqueueFiles(standaloneFiles);
+        }
+        folderGroups.forEach((groupFiles, folderName) => {
+            const folderUploader = new FolderUploader(folderName, groupFiles);
+            activeUploaders.set(folderUploader.elementId, folderUploader);
+            folderUploader.start();
+        });
+    } catch (err) {
+        console.error("Error reading dropped items:", err);
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            enqueueFiles(Array.from(e.dataTransfer.files));
+        }
     }
 });
+
+// ---------------------------------------------------------------------------
+// Interactive Folder Explorer Modal Logic
+// ---------------------------------------------------------------------------
+let currentExplorerPath = '';
+let currentExplorerItems = [];
+
+async function openFolderModal(folderPath) {
+    const modal = document.getElementById('folderModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    document.getElementById('folderSearchInput').value = '';
+    await loadFolderContents(folderPath);
+}
+
+function closeFolderModal(event) {
+    const modal = document.getElementById('folderModal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function loadFolderContents(folderPath) {
+    currentExplorerPath = folderPath;
+    const listEl = document.getElementById('folderExplorerList');
+    const titleEl = document.getElementById('folderModalTitle');
+    const zipBtn = document.getElementById('folderModalZipBtn');
+    const breadcrumbsEl = document.getElementById('folderBreadcrumbs');
+
+    if (listEl) listEl.innerHTML = '<div style="padding: 1.5rem; text-align: center; color: var(--text-secondary); font-size: 0.82rem;">Loading folder contents...</div>';
+
+    const rootFolder = folderPath.split('/')[0];
+    if (titleEl) titleEl.textContent = rootFolder;
+    if (zipBtn) zipBtn.href = `/download/zip/${encodeURIComponent(rootFolder)}`;
+
+    try {
+        const res = await fetch(`/folder/contents/${encodeURI(folderPath)}`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load directory");
+        }
+        const data = await res.json();
+        currentExplorerItems = data.items || [];
+        renderFolderBreadcrumbs(data.breadcrumbs || []);
+        renderFolderItems(currentExplorerItems);
+    } catch (err) {
+        if (listEl) {
+            listEl.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: #f87171; font-size: 0.82rem;">${escapeHtml(err.message)}</div>`;
+        }
+    }
+}
+
+function renderFolderBreadcrumbs(breadcrumbs) {
+    const el = document.getElementById('folderBreadcrumbs');
+    if (!el) return;
+
+    let html = '';
+    breadcrumbs.forEach((crumb, idx) => {
+        const isLast = idx === breadcrumbs.length - 1;
+        if (idx > 0) html += '<span class="breadcrumb-sep">/</span>';
+        if (isLast) {
+            html += `<span class="breadcrumb-crumb active">${escapeHtml(crumb.name)}</span>`;
+        } else {
+            html += `<span class="breadcrumb-crumb" onclick="loadFolderContents('${escapeHtml(crumb.path)}')">${escapeHtml(crumb.name)}</span>`;
+        }
+    });
+    el.innerHTML = html;
+}
+
+function renderFolderItems(items) {
+    const listEl = document.getElementById('folderExplorerList');
+    if (!listEl) return;
+
+    if (!items || items.length === 0) {
+        listEl.innerHTML = '<div style="padding: 2rem 1rem; text-align: center; color: var(--text-tertiary); font-size: 0.82rem;">This folder is empty</div>';
+        return;
+    }
+
+    listEl.innerHTML = items.map(item => {
+        if (item.is_folder) {
+            return `
+                <div class="folder-explorer-item" data-name="${escapeHtml(item.name.toLowerCase())}">
+                    <div class="folder-item-left" style="cursor: pointer;" onclick="loadFolderContents('${escapeHtml(item.relative_path)}')">
+                        <div class="file-icon-box file-folder" style="width: 32px; height: 32px;">
+                            <svg viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                        </div>
+                        <div class="folder-item-info">
+                            <span class="folder-item-name">${escapeHtml(item.name)}/</span>
+                            <span class="folder-item-meta">${item.file_count} files · ${item.size_str}</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline" onclick="loadFolderContents('${escapeHtml(item.relative_path)}')">Open</button>
+                </div>
+            `;
+        } else {
+            return `
+                <div class="folder-explorer-item" data-name="${escapeHtml(item.name.toLowerCase())}">
+                    <div class="folder-item-left">
+                        <div class="file-icon-box ${item.type_info ? item.type_info.badge_class : 'file-generic'}" style="width: 32px; height: 32px;">
+                            <svg viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        </div>
+                        <div class="folder-item-info">
+                            <span class="folder-item-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+                            <span class="folder-item-meta">${item.size_str} · ${item.mtime_str}</span>
+                        </div>
+                    </div>
+                    <a href="/download/${encodeURI(item.relative_path)}" class="btn btn-sm" download aria-label="Download ${escapeHtml(item.name)}">
+                        <svg class="svg-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                        <span>Download</span>
+                    </a>
+                </div>
+            `;
+        }
+    }).join('');
+}
+
+function filterFolderModalContents() {
+    const query = document.getElementById('folderSearchInput') ? document.getElementById('folderSearchInput').value.toLowerCase().trim() : '';
+    const items = document.querySelectorAll('#folderExplorerList .folder-explorer-item');
+    items.forEach(el => {
+        const name = el.getAttribute('data-name') || '';
+        el.style.display = (!query || name.includes(query)) ? 'flex' : 'none';
+    });
+}
 
 // Page visibility and connection recovery
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
         activeUploaders.forEach(uploader => {
             if ((uploader.status === 'uploading' && !uploader.isLoopRunning) || uploader.status === 'error') {
-                uploader.reconcileAndResume(false);
+                if (uploader.reconcileAndResume) uploader.reconcileAndResume(false);
             }
         });
         processUploadQueue();
@@ -2680,7 +3686,7 @@ window.addEventListener('online', () => {
     showToast("Network restored");
     activeUploaders.forEach(uploader => {
         if ((uploader.status === 'uploading' && !uploader.isLoopRunning) || uploader.status === 'error') {
-            uploader.reconcileAndResume(false);
+            if (uploader.reconcileAndResume) uploader.reconcileAndResume(false);
         }
     });
     processUploadQueue();
@@ -2706,24 +3712,49 @@ window.addEventListener('DOMContentLoaded', () => {
 
 @app.route('/')
 def index():
-    """Renders the main QuickShare page listing completed files in uploads/ and LAN details."""
-    file_list = []
+    """Renders the main QuickShare page listing completed files and folders in uploads/ and LAN details."""
+    item_list = []
     if os.path.exists(UPLOAD_DIR):
         try:
             for fname in os.listdir(UPLOAD_DIR):
+                if fname.startswith('.'):
+                    continue
                 full_path = os.path.join(UPLOAD_DIR, fname)
-                if os.path.isfile(full_path) and not fname.startswith('.') and is_safe_path(UPLOAD_DIR, full_path):
+                if not is_safe_path(UPLOAD_DIR, full_path):
+                    continue
+                    
+                if os.path.isdir(full_path):
+                    folder_size, file_count = get_folder_stats(full_path)
+                    stat = os.stat(full_path)
+                    item_list.append({
+                        "name": fname,
+                        "is_folder": True,
+                        "file_count": file_count,
+                        "size": folder_size,
+                        "size_str": format_bytes(folder_size),
+                        "mtime": stat.st_mtime,
+                        "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime("%b %d, %Y"),
+                        "type_info": {
+                            "category": "folders",
+                            "label": f"Folder · {file_count} files",
+                            "badge_class": "file-folder",
+                            "icon": "folder"
+                        }
+                    })
+                elif os.path.isfile(full_path):
                     stat = os.stat(full_path)
                     type_info = get_file_type_info(fname)
-                    file_list.append({
+                    item_list.append({
                         "name": fname,
+                        "is_folder": False,
                         "size": stat.st_size,
                         "size_str": format_bytes(stat.st_size),
                         "mtime": stat.st_mtime,
                         "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime("%b %d, %Y"),
                         "type_info": type_info
                     })
-            file_list.sort(key=lambda x: x["mtime"], reverse=True)
+            # Folders first, then files sorted by mtime descending
+            item_list.sort(key=lambda x: (not x.get("is_folder", False), -x["mtime"]))
         except Exception as e:
             logger.error(f"Error listing uploads directory: {e}")
             
@@ -2733,7 +3764,7 @@ def index():
 
     return render_template_string(
         UPLOAD_HTML,
-        files=file_list,
+        files=item_list,
         lan_ip=lan_ip,
         port=PORT,
         lan_url=lan_url,
@@ -2754,6 +3785,70 @@ def qr_code_endpoint():
         return jsonify({"success": False, "error": "QR generator not available"}), 404
 
 
+@app.route('/folder/upload/start', methods=['POST'])
+def folder_upload_start():
+    """Initializes a new folder upload session and creates authoritative manifest."""
+    data = request.get_json(silent=True) or {}
+    folder_name = data.get("folder_name", "").strip()
+    total_files = data.get("total_files", 0)
+    total_size = data.get("total_size", 0)
+    files_manifest = data.get("files", [])
+
+    if not folder_name:
+        return jsonify({"success": False, "error": "Folder name is required"}), 400
+
+    safe_folder_name = sanitize_folder_name(folder_name)
+    folder_id = str(uuid.uuid4())
+    cache_dir = get_folder_cache_dir(folder_id)
+    os.makedirs(os.path.join(cache_dir, "files"), exist_ok=True)
+
+    validated_files = {}
+    seen_rel_paths = set()
+    for item in files_manifest:
+        raw_rel = item.get("relative_path", "")
+        clean_rel = sanitize_relative_path(raw_rel)
+        if not clean_rel:
+            continue
+        if clean_rel in seen_rel_paths:
+            return jsonify({"success": False, "error": f"Duplicate relative path detected: '{clean_rel}'"}), 400
+        seen_rel_paths.add(clean_rel)
+        f_size = int(item.get("size", 0))
+        validated_files[clean_rel] = {
+            "relative_path": clean_rel,
+            "filename": os.path.basename(clean_rel),
+            "size": f_size,
+            "upload_id": None,
+            "status": "pending",
+            "sha256": None
+        }
+
+    metadata = {
+        "folder_id": folder_id,
+        "folder_name": folder_name,
+        "safe_folder_name": safe_folder_name,
+        "total_files": len(validated_files),
+        "total_size": total_size,
+        "files": validated_files,
+        "status": "uploading",
+        "created_at": time.time(),
+        "updated_at": time.time()
+    }
+
+    with upload_lock_manager.acquire(f"folder_{folder_id}"):
+        if not save_folder_metadata(folder_id, metadata, write_disk=True):
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            return jsonify({"success": False, "error": "Failed to initialize folder metadata"}), 500
+
+    logger.info(f"FOLDER UPLOAD START: folder_id={folder_id}, name='{safe_folder_name}', files={len(validated_files)}, size={total_size} bytes")
+    return jsonify({
+        "success": True,
+        "folder_id": folder_id,
+        "folder_name": safe_folder_name,
+        "total_files": len(validated_files),
+        "total_size": total_size
+    }), 201
+
+
 @app.route('/upload/start', methods=['POST'])
 def upload_start():
     """Initializes a new upload session, creates cache/<upload_id>/ and metadata.json."""
@@ -2762,6 +3857,8 @@ def upload_start():
     total_size = data.get("total_size")
     chunk_size = data.get("chunk_size", DEFAULT_CHUNK_SIZE)
     file_hash = data.get("file_hash", "")
+    folder_id = data.get("folder_id")
+    relative_path = data.get("relative_path")
 
     if not filename:
         return jsonify({"success": False, "error": "Filename is required"}), 400
@@ -2788,10 +3885,14 @@ def upload_start():
     chunks_dir = get_chunks_dir(upload_id)
     os.makedirs(chunks_dir, exist_ok=True)
 
+    clean_rel = sanitize_relative_path(relative_path or filename) if folder_id else None
+
     metadata = {
         "upload_id": upload_id,
         "filename": filename,
         "safe_filename": safe_name,
+        "folder_id": folder_id,
+        "relative_path": clean_rel,
         "total_size": total_size,
         "chunk_size": chunk_size,
         "total_chunks": total_chunks,
@@ -2802,6 +3903,23 @@ def upload_start():
         "updated_at": time.time(),
         "status": "uploading"
     }
+
+    if folder_id:
+        if not is_valid_uuid(folder_id):
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            return jsonify({"success": False, "error": "Invalid folder_id format"}), 400
+        folder_cache = get_folder_cache_dir(folder_id)
+        if not folder_cache or not os.path.exists(folder_cache):
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            return jsonify({"success": False, "error": "Folder upload session not found or expired"}), 404
+
+        with upload_lock_manager.acquire(f"folder_{folder_id}"):
+            f_meta = load_folder_metadata(folder_id)
+            if f_meta and clean_rel in f_meta.get("files", {}):
+                f_meta["files"][clean_rel]["upload_id"] = upload_id
+                f_meta["files"][clean_rel]["status"] = "uploading"
+                f_meta["updated_at"] = time.time()
+                save_folder_metadata(folder_id, f_meta, write_disk=True)
 
     with upload_lock_manager.acquire(upload_id):
         if not save_metadata(upload_id, metadata, write_disk=True):
@@ -2876,7 +3994,6 @@ def upload_chunk():
     # -----------------------
     try:
         with upload_lock_manager.acquire(upload_id):
-            # Reload authoritative metadata under lock
             metadata = load_metadata(upload_id)
             if not metadata:
                 return jsonify({"success": False, "error": "Upload session metadata not found"}), 404
@@ -2896,7 +4013,6 @@ def upload_chunk():
             inflight.add(chunk_index)
             metadata["in_flight_chunks"] = inflight
             metadata["updated_at"] = time.time()
-            # Persist reservation in-memory; avoid disk write during hot loop
             save_metadata(upload_id, metadata, write_disk=False)
     except Exception as e:
         logger.error(f"Error reserving chunk {chunk_index} for upload_id={upload_id}: {e}")
@@ -2917,13 +4033,11 @@ def upload_chunk():
             except OSError:
                 pass
         else:
-            # Atomic replace for chunk file (idempotent overwrite if retried)
             os.replace(temp_chunk_path, chunk_path)
     except Exception as e:
         logger.error(f"Error saving chunk {chunk_index} for upload_id={upload_id}: {e}")
         write_error = (500, {"success": False, "error": "Internal error storing chunk"})
 
-    # If write failed, remove reservation and respond
     if write_error is not None:
         try:
             with upload_lock_manager.acquire(upload_id):
@@ -2943,7 +4057,6 @@ def upload_chunk():
         with upload_lock_manager.acquire(upload_id):
             meta = load_metadata(upload_id)
             if not meta:
-                # Clean up written chunk if metadata vanished
                 try:
                     os.remove(chunk_path)
                 except OSError:
@@ -2951,7 +4064,6 @@ def upload_chunk():
                 return jsonify({"success": False, "error": "Upload session metadata not found"}), 404
 
             if meta.get("status") == "cancelled":
-                # Cancel wins; remove chunk and reservation
                 try:
                     if os.path.exists(chunk_path):
                         os.remove(chunk_path)
@@ -2963,7 +4075,6 @@ def upload_chunk():
                     save_metadata(upload_id, meta, write_disk=False)
                 return jsonify({"success": False, "error": "Upload was cancelled"}), 400
 
-            # If another concurrent finalizer already recorded it, just clear in-flight
             if chunk_index in meta.get("received_chunks", set()):
                 if "in_flight_chunks" in meta:
                     meta["in_flight_chunks"].discard(chunk_index)
@@ -2971,7 +4082,6 @@ def upload_chunk():
                     save_metadata(upload_id, meta, write_disk=False)
                 return jsonify({"success": True, "upload_id": upload_id, "chunk_index": chunk_index, "received_count": len(meta.get("received_chunks", []))}), 200
 
-            # Mark chunk as fully received
             recv = meta.get("received_chunks") or set()
             recv.add(chunk_index)
             meta["received_chunks"] = recv
@@ -2981,7 +4091,6 @@ def upload_chunk():
             save_metadata(upload_id, meta, write_disk=False)
     except Exception as e:
         logger.error(f"Error finalizing chunk {chunk_index} for upload_id={upload_id}: {e}")
-        # Best-effort cleanup of temp and in-flight state
         try:
             with upload_lock_manager.acquire(upload_id):
                 meta = load_metadata(upload_id)
@@ -2993,7 +4102,6 @@ def upload_chunk():
             pass
         return jsonify({"success": False, "error": "Internal error finalizing chunk"}), 500
 
-    logger.debug(f"CHUNK RECEIVED: upload_id={upload_id}, chunk={chunk_index}/{metadata['total_chunks']-1}, received_total={len(metadata['received_chunks'])}")
     return jsonify({
         "success": True,
         "upload_id": upload_id,
@@ -3086,7 +4194,6 @@ def upload_complete():
         total_chunks = metadata["total_chunks"]
         expected_size = metadata["total_size"]
 
-        # Verify all expected chunk files exist on disk OR are reserved as in-flight
         inflight = metadata.get("in_flight_chunks", set())
         missing_chunks = []
         for i in range(total_chunks):
@@ -3101,11 +4208,9 @@ def upload_complete():
                 "missing_chunks": missing_chunks
             }), 400
 
-        # Transition status to assembling and persist
         metadata["status"] = "assembling"
         metadata["updated_at"] = time.time()
         save_metadata(upload_id, metadata, write_disk=True)
-        # Snapshot in-flight set so we can wait for files without holding the lock
         snapshot_inflight = set(inflight)
         logger.info(f"ASSEMBLY START: upload_id={upload_id}, total_chunks={total_chunks}, expected_size={expected_size}, inflight={len(snapshot_inflight)}")
 
@@ -3118,9 +4223,6 @@ def upload_complete():
     assembly_error = None
 
     try:
-        # If there were reserved in-flight chunks at time of transition, wait briefly for their files
-        # to appear on disk so they are included in the streaming pass. This avoids missing a chunk
-        # that was accepted just before assembly began.
         if snapshot_inflight:
             WAIT_INFLIGHT_SECONDS = 30
             wait_start = time.time()
@@ -3187,27 +4289,259 @@ def upload_complete():
             save_metadata(upload_id, latest_meta, write_disk=True)
             return jsonify({"success": False, "error": assembly_error}), 400
 
-        # Atomic collision-safe final filename generation
-        with upload_lock_manager.filename_lock():
-            final_filename = get_unique_filename(UPLOAD_DIR, latest_meta["safe_filename"])
-            final_dest = os.path.join(UPLOAD_DIR, final_filename)
-            shutil.move(assembled_tmp, final_dest)
+        calculated_hash = hasher.hexdigest()
+        folder_id = latest_meta.get("folder_id")
 
-        latest_meta["status"] = "completed"
-        latest_meta["safe_filename"] = final_filename
-        latest_meta["updated_at"] = time.time()
-        
-        upload_lock_manager.remove_cached_meta(upload_id)
-        shutil.rmtree(cache_dir, ignore_errors=True)
+        if folder_id:
+            # File belongs to a folder upload session: stage assembled file in upload cache for folder completion
+            assembled_bin = os.path.join(cache_dir, "assembled.bin")
+            os.replace(assembled_tmp, assembled_bin)
+            latest_meta["status"] = "completed"
+            latest_meta["sha256"] = calculated_hash
+            latest_meta["updated_at"] = time.time()
+            save_metadata(upload_id, latest_meta, write_disk=True)
 
-    calculated_hash = hasher.hexdigest()
-    logger.info(f"UPLOAD COMPLETED: upload_id={upload_id}, saved='{final_filename}', size={assembled_size} bytes, sha256={calculated_hash}")
+            with upload_lock_manager.acquire(f"folder_{folder_id}"):
+                f_meta = load_folder_metadata(folder_id)
+                rel_p = latest_meta.get("relative_path")
+                if f_meta and rel_p in f_meta.get("files", {}):
+                    f_meta["files"][rel_p]["status"] = "completed"
+                    f_meta["files"][rel_p]["sha256"] = calculated_hash
+                    f_meta["updated_at"] = time.time()
+                    save_folder_metadata(folder_id, f_meta, write_disk=True)
+
+            logger.info(f"FOLDER FILE COMPLETED: folder_id={folder_id}, rel='{rel_p}', size={assembled_size} bytes, sha256={calculated_hash}")
+            return jsonify({
+                "success": True,
+                "filename": latest_meta["safe_filename"],
+                "relative_path": rel_p,
+                "size": assembled_size,
+                "sha256": calculated_hash,
+                "folder_id": folder_id
+            }), 200
+        else:
+            # Standalone file: move directly to UPLOAD_DIR
+            with upload_lock_manager.filename_lock():
+                final_filename = get_unique_filename(UPLOAD_DIR, latest_meta["safe_filename"])
+                final_dest = os.path.join(UPLOAD_DIR, final_filename)
+                shutil.move(assembled_tmp, final_dest)
+
+            latest_meta["status"] = "completed"
+            latest_meta["safe_filename"] = final_filename
+            latest_meta["updated_at"] = time.time()
+            
+            upload_lock_manager.remove_cached_meta(upload_id)
+            shutil.rmtree(cache_dir, ignore_errors=True)
+
+            logger.info(f"UPLOAD COMPLETED: upload_id={upload_id}, saved='{final_filename}', size={assembled_size} bytes, sha256={calculated_hash}")
+            return jsonify({
+                "success": True,
+                "filename": final_filename,
+                "size": assembled_size,
+                "sha256": calculated_hash,
+                "message": f"{final_filename} uploaded and verified successfully"
+            }), 200
+
+
+@app.route('/folder/upload/complete', methods=['POST'])
+def folder_upload_complete():
+    """Atomically finalizes and publishes an entire completed folder into uploads/."""
+    data = request.get_json(silent=True) or {}
+    folder_id = data.get("folder_id")
+
+    if not folder_id or not is_valid_uuid(folder_id):
+        return jsonify({"success": False, "error": "Invalid or missing folder_id"}), 400
+
+    folder_cache = get_folder_cache_dir(folder_id)
+    if not folder_cache or not os.path.exists(folder_cache):
+        return jsonify({"success": False, "error": "Folder upload session not found or expired"}), 404
+
+    with upload_lock_manager.acquire(f"folder_{folder_id}"):
+        f_meta = load_folder_metadata(folder_id)
+        if not f_meta:
+            return jsonify({"success": False, "error": "Folder metadata not found"}), 404
+
+        if f_meta.get("status") == "completed":
+            return jsonify({"success": True, "message": "Folder already completed", "folder_name": f_meta.get("safe_folder_name")}), 200
+        if f_meta.get("status") == "cancelled":
+            return jsonify({"success": False, "error": "Folder upload was cancelled"}), 400
+
+        files = f_meta.get("files", {})
+        for rel_p, finfo in files.items():
+            u_id = finfo.get("upload_id")
+            if not u_id or finfo.get("status") != "completed":
+                return jsonify({"success": False, "error": f"Cannot complete folder: '{rel_p}' is not finished ({finfo.get('status')})"}), 400
+
+            file_cache_dir = get_upload_cache_dir(u_id)
+            bin_path = os.path.join(file_cache_dir, "assembled.bin") if file_cache_dir else None
+            if not bin_path or not os.path.exists(bin_path):
+                return jsonify({"success": False, "error": f"Missing assembled file for '{rel_p}'"}), 400
+
+        f_meta["status"] = "assembling"
+        f_meta["updated_at"] = time.time()
+        save_folder_metadata(folder_id, f_meta, write_disk=True)
+
+    with upload_lock_manager.filename_lock():
+        final_folder_name = get_unique_folder_name(UPLOAD_DIR, f_meta["safe_folder_name"])
+        final_folder_dir = os.path.join(UPLOAD_DIR, final_folder_name)
+        os.makedirs(final_folder_dir, exist_ok=True)
+
+        for rel_p, finfo in files.items():
+            u_id = finfo["upload_id"]
+            file_cache_dir = get_upload_cache_dir(u_id)
+            bin_path = os.path.join(file_cache_dir, "assembled.bin")
+            dest_path = os.path.join(final_folder_dir, rel_p)
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            shutil.move(bin_path, dest_path)
+
+    with upload_lock_manager.acquire(f"folder_{folder_id}"):
+        for rel_p, finfo in files.items():
+            u_id = finfo.get("upload_id")
+            if u_id:
+                upload_lock_manager.remove_cached_meta(u_id)
+                c_dir = get_upload_cache_dir(u_id)
+                if c_dir:
+                    shutil.rmtree(c_dir, ignore_errors=True)
+
+        upload_lock_manager.remove_cached_meta(f"folder_{folder_id}")
+        shutil.rmtree(folder_cache, ignore_errors=True)
+
+    logger.info(f"FOLDER UPLOAD COMPLETED: folder_id={folder_id}, saved='{final_folder_name}', files={len(files)}")
     return jsonify({
         "success": True,
-        "filename": final_filename,
-        "size": assembled_size,
-        "sha256": calculated_hash,
-        "message": f"{final_filename} uploaded and verified successfully"
+        "folder_name": final_folder_name,
+        "total_files": len(files),
+        "total_size": f_meta["total_size"],
+        "message": f"Folder {final_folder_name} uploaded and published successfully"
+    }), 200
+
+
+@app.route('/folder/upload/cancel/<path:folder_id>', methods=['POST', 'DELETE'])
+def folder_upload_cancel(folder_id):
+    """Explicitly cancels an in-progress folder upload and completely purges its cache."""
+    if not is_valid_uuid(folder_id):
+        return jsonify({"success": False, "error": "Invalid folder_id format"}), 400
+    folder_cache = get_folder_cache_dir(folder_id)
+    if not folder_cache:
+        return jsonify({"success": False, "error": "Invalid folder path"}), 400
+
+    with upload_lock_manager.acquire(f"folder_{folder_id}"):
+        f_meta = load_folder_metadata(folder_id)
+        if f_meta:
+            f_meta["status"] = "cancelled"
+            f_meta["updated_at"] = time.time()
+            save_folder_metadata(folder_id, f_meta, write_disk=False)
+            for rel_p, finfo in f_meta.get("files", {}).items():
+                u_id = finfo.get("upload_id")
+                if u_id:
+                    upload_lock_manager.remove_cached_meta(u_id)
+                    c_dir = get_upload_cache_dir(u_id)
+                    if c_dir:
+                        shutil.rmtree(c_dir, ignore_errors=True)
+
+        upload_lock_manager.remove_cached_meta(f"folder_{folder_id}")
+        if os.path.exists(folder_cache):
+            shutil.rmtree(folder_cache, ignore_errors=True)
+
+    logger.info(f"FOLDER UPLOAD CANCELLED: folder_id={folder_id}. Cache purged.")
+    return jsonify({"success": True, "message": "Folder upload cancelled and cache purged"}), 200
+
+
+@app.route('/folder/status/<path:folder_id>', methods=['GET'])
+def folder_status(folder_id):
+    """Returns authoritative status of an in-progress folder upload session."""
+    if not is_valid_uuid(folder_id):
+        return jsonify({"success": False, "error": "Invalid folder_id format"}), 400
+    folder_cache = get_folder_cache_dir(folder_id)
+    if not folder_cache or not os.path.exists(folder_cache):
+        return jsonify({"success": False, "error": "Folder upload not found or expired"}), 404
+
+    with upload_lock_manager.acquire(f"folder_{folder_id}"):
+        f_meta = load_folder_metadata(folder_id)
+        if not f_meta:
+            return jsonify({"success": False, "error": "Folder metadata not found"}), 404
+
+        return jsonify({
+            "success": True,
+            "folder_id": folder_id,
+            "folder_name": f_meta["folder_name"],
+            "safe_folder_name": f_meta["safe_folder_name"],
+            "total_files": f_meta["total_files"],
+            "total_size": f_meta["total_size"],
+            "status": f_meta.get("status", "uploading"),
+            "files": f_meta.get("files", {})
+        }), 200
+
+
+@app.route('/folder/contents/<path:folder_path>', methods=['GET'])
+def folder_contents(folder_path):
+    """Returns the contents of a directory inside uploads/ for in-browser Folder Explorer."""
+    clean_path = folder_path.strip().strip('/')
+    target_dir = os.path.join(UPLOAD_DIR, clean_path)
+
+    if not is_safe_path(UPLOAD_DIR, target_dir):
+        return jsonify({"success": False, "error": "Access denied: invalid path"}), 403
+
+    if not os.path.exists(target_dir) or not os.path.isdir(target_dir):
+        return jsonify({"success": False, "error": "Directory not found"}), 404
+
+    items = []
+    try:
+        for entry in os.listdir(target_dir):
+            if entry.startswith('.'):
+                continue
+            full_entry_path = os.path.join(target_dir, entry)
+            rel_from_uploads = os.path.relpath(full_entry_path, UPLOAD_DIR).replace('\\', '/')
+
+            if os.path.isdir(full_entry_path):
+                sub_size, sub_count = get_folder_stats(full_entry_path)
+                stat = os.stat(full_entry_path)
+                items.append({
+                    "name": entry,
+                    "relative_path": rel_from_uploads,
+                    "is_folder": True,
+                    "file_count": sub_count,
+                    "size": sub_size,
+                    "size_str": format_bytes(sub_size),
+                    "mtime": stat.st_mtime,
+                    "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime("%b %d, %Y"),
+                    "type_info": {
+                        "category": "folders",
+                        "label": f"Folder · {sub_count} files",
+                        "badge_class": "file-folder",
+                        "icon": "folder"
+                    }
+                })
+            elif os.path.isfile(full_entry_path):
+                stat = os.stat(full_entry_path)
+                t_info = get_file_type_info(entry)
+                items.append({
+                    "name": entry,
+                    "relative_path": rel_from_uploads,
+                    "is_folder": False,
+                    "size": stat.st_size,
+                    "size_str": format_bytes(stat.st_size),
+                    "mtime": stat.st_mtime,
+                    "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime("%b %d, %Y"),
+                    "type_info": t_info
+                })
+        items.sort(key=lambda x: (not x["is_folder"], x["name"].lower()))
+    except Exception as e:
+        logger.error(f"Error listing folder contents for {folder_path}: {e}")
+        return jsonify({"success": False, "error": "Failed to read folder contents"}), 500
+
+    parts = [p for p in clean_path.split('/') if p]
+    breadcrumbs = []
+    accum = ""
+    for p in parts:
+        accum = f"{accum}/{p}" if accum else p
+        breadcrumbs.append({"name": p, "path": accum})
+
+    return jsonify({
+        "success": True,
+        "current_path": clean_path,
+        "breadcrumbs": breadcrumbs,
+        "items": items
     }), 200
 
 
@@ -3242,23 +4576,89 @@ def upload_cancel(upload_id):
             return jsonify({"success": True, "message": "Upload already cancelled or not found"}), 200
 
 
-@app.route('/download/<path:filename>')
-def download_file(filename):
+@app.route('/download/<path:filepath>')
+def download_file(filepath):
     """
     Securely serves completed files strictly from uploads/.
+    Supports top-level files ('report.pdf') and nested files inside folders ('MyProject/src/main.py').
     Supports HTTP Range requests (RFC 7233 / 9110), streaming, and safe path resolution.
     Never serves from cache/ or temporary files.
     """
-    safe_name = os.path.basename(filename)
-    target_path = os.path.join(UPLOAD_DIR, safe_name)
-    
+    clean_path = filepath.strip().strip('/')
+    target_path = os.path.join(UPLOAD_DIR, clean_path)
+
     if not is_safe_path(UPLOAD_DIR, target_path):
         abort(403)
-        
+
     if not os.path.exists(target_path) or not os.path.isfile(target_path):
         abort(404)
-        
-    return send_from_directory(UPLOAD_DIR, safe_name, as_attachment=True, conditional=True)
+
+    directory = os.path.dirname(target_path)
+    filename = os.path.basename(target_path)
+    return send_from_directory(directory, filename, as_attachment=True, conditional=True)
+
+
+@app.route('/download/zip/<path:folder_name>')
+def download_folder_zip(folder_name):
+    """
+    Generates and streams a ZIP containing the complete folder directory structure.
+    Temporary ZIP files are created in CACHE_DIR and cleaned up safely upon response completion.
+    """
+    clean_folder = folder_name.strip().strip('/')
+    target_folder = os.path.join(UPLOAD_DIR, clean_folder)
+
+    if not is_safe_path(UPLOAD_DIR, target_folder):
+        abort(403)
+
+    if not os.path.exists(target_folder) or not os.path.isdir(target_folder):
+        abort(404)
+
+    zip_temp_id = f"zip_{uuid.uuid4().hex}"
+    temp_zip_path = os.path.join(CACHE_DIR, f"{zip_temp_id}.zip")
+
+    try:
+        with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            base_folder_name = os.path.basename(target_folder)
+            for root, dirs, files in os.walk(target_folder):
+                for f in files:
+                    if f.startswith('.'):
+                        continue
+                    full_file_path = os.path.join(root, f)
+                    if not is_safe_path(target_folder, full_file_path):
+                        continue
+                    rel_inside = os.path.relpath(full_file_path, target_folder)
+                    arcname = os.path.join(base_folder_name, rel_inside).replace('\\', '/')
+                    zf.write(full_file_path, arcname)
+
+        def stream_and_remove():
+            try:
+                with open(temp_zip_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(64 * 1024)
+                        if not chunk:
+                            break
+                        yield chunk
+            finally:
+                try:
+                    if os.path.exists(temp_zip_path):
+                        os.remove(temp_zip_path)
+                except OSError:
+                    pass
+
+        safe_zip_filename = f"{secure_filename(os.path.basename(target_folder)) or 'folder'}.zip"
+        response = Response(stream_and_remove(), mimetype='application/zip')
+        response.headers['Content-Disposition'] = f'attachment; filename="{safe_zip_filename}"'
+        if os.path.exists(temp_zip_path):
+            response.headers['Content-Length'] = str(os.path.getsize(temp_zip_path))
+        return response
+    except Exception as e:
+        logger.error(f"Error creating ZIP for folder {folder_name}: {e}")
+        if os.path.exists(temp_zip_path):
+            try:
+                os.remove(temp_zip_path)
+            except OSError:
+                pass
+        abort(500)
 
 
 # -----------------------------------------------------------------------------

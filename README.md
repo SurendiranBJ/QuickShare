@@ -22,6 +22,9 @@ QuickShare is designed specifically for trusted local network transfers. It does
 
 ## 2. Key Features
 - **LAN Optimized**: Dynamically discovers and displays the primary LAN IP and generates a scannable QR code for instant phone-to-PC connections via the **Connect device** modal.
+- **Folder Upload & Sharing**: Upload entire directory trees via the folder picker or drag-and-drop. Internal directory structures are strictly preserved on the server under `uploads/<folder_name>/`.
+- **Interactive Folder Explorer**: In-browser folder navigation modal with dynamic breadcrumb navigation (`Home / MyProject / src`), clickable subfolders, search within folders, individual file downloads, and one-click **Download ZIP**.
+- **Streaming Folder ZIP Downloads**: Download any shared folder as a single ZIP archive on-the-fly (`GET /download/zip/<folder_name>`). Uses disk-backed streaming with automatic cleanup, preventing RAM exhaustion.
 - **Chunked Transfers**: Slices large files into manageable 8 MB chunks via browser `File.slice()`, avoiding request timeouts and payload limits.
 - **Resumable Transfers**: Interrupted transfers resume from the exact missing chunk without re-uploading completed chunks.
 - **True Pause & Resume**: Manual pause immediately aborts in-flight network requests (`AbortController`) while safely preserving the server staging cache. Background events (`online`, `visibilitychange`) will never override an explicit manual pause.
@@ -29,15 +32,15 @@ QuickShare is designed specifically for trusted local network transfers. It does
 - **SHA-256 File Integrity Verification**: Computes the SHA-256 hash incrementally during assembly and verifies byte count against the client metadata before publishing.
 - **Controlled Concurrency**: 4 concurrent chunk workers per file (`UPLOAD_CONCURRENCY = 4`) for optimal network saturation on 5 GHz Wi-Fi and high-speed LANs.
 - **Streaming Assembly**: Large files are assembled using a fixed 1 MB streaming buffer (`STREAM_BUFFER_SIZE = 1024 * 1024`), guaranteeing low memory consumption regardless of file size.
-- **Safe Receiver Downloads**: Downloads support HTTP Range requests (`206 Partial Content`), media seeking, and multi-client concurrent streaming strictly from `uploads/`. Receiver cancellations or network drops never delete server files.
-- **Collision-Safe Filenames**: Automatically generates unique names (e.g., `video (1).mp4`) without overwriting existing files in `uploads/`.
-- **Cache Isolation**: In-progress chunks remain strictly inside `cache/<upload_id>/` and are never accessible via download endpoints until verified and finalized.
+- **Safe Receiver Downloads**: Downloads support HTTP Range requests (`206 Partial Content`), media seeking, nested sub-paths, and multi-client concurrent streaming strictly from `uploads/`. Receiver cancellations or network drops never delete server files.
+- **Collision-Safe Filenames & Folders**: Automatically generates unique names (e.g., `MyProject (1)`) without overwriting existing items in `uploads/`.
+- **Cache Isolation**: In-progress chunks remain strictly inside `cache/` and are never accessible via download endpoints until verified and finalized.
 - **Automatic Cache Cleanup**: Background worker daemon safely purges abandoned incomplete uploads older than `UPLOAD_CACHE_TIMEOUT` (default: 6 hours), while strictly protecting active assemblies (`status == "assembling"`).
 - **Browser Session Recovery**: Active upload sessions are tracked in browser `localStorage`. When the page is reloaded, an interrupted upload prompt allows instant resume upon file selection.
 - **Network & Tab Visibility Recovery**: Automatically reconciles missing chunk state with the server when connection is restored or when returning to a backgrounded tab.
 - **Per-Upload Locking (`UploadLockManager`)**: Independent uploads synchronize on their own isolated lock with reference counting, eliminating global thread contention.
-- **Multi-File Queue & Controlled Concurrency**: Supports selecting or dropping multiple files simultaneously. Enqueues files into independent upload jobs with dedicated progress bars, isolated pause/resume/cancel controls, and controlled concurrency (`MAX_CONCURRENT_FILES = 2`, each with 4 chunk workers) to prevent socket exhaustion.
-- **Professional Categorized UI**: Modern dark theme with file-type icons, instant search, horizontal mobile category filtering (All, Images, Videos, Audio, Documents, Archives, Code, Applications, Other), and zero emojis.
+- **Multi-File & Folder Queue**: Supports selecting or dropping multiple files and directories simultaneously. Enqueues items with dedicated progress tracks, isolated controls, and controlled concurrency (`MAX_CONCURRENT_FILES = 2`, each with 4 chunk workers).
+- **Professional Categorized UI**: Modern dark theme with file-type icons, instant search, horizontal mobile category filtering (All, Folders, Images, Videos, Audio, Documents, Archives, Code, Applications, Other), and zero emojis.
 
 ---
 
@@ -49,8 +52,8 @@ QuickShare/
 |-- requirements.txt       # Production dependencies (Flask, Werkzeug, qrcode)
 |-- README.md              # Operational and technical manual
 |-- .gitignore             # Excludes uploads/, cache/, venv/, and temporary runtime files
-|-- uploads/               # Verified completed files (auto-created on startup)
-\-- cache/                 # Temporary chunk staging directories (auto-created on startup)
+|-- uploads/               # Verified completed files and folders (auto-created on startup)
+\-- cache/                 # Temporary chunk and folder staging directories (auto-created on startup)
 ```
 
 ---
@@ -62,7 +65,7 @@ QuickShare/
   - `Werkzeug >= 3.0.0`
   - `qrcode >= 7.4.2`
 - **Supported Operating Systems**: Windows, Linux, macOS
-- **Browser Requirements**: Modern browser supporting `fetch`, `AbortController`, `File.slice()`, and `localStorage` (Chrome, Edge, Firefox, Safari).
+- **Browser Requirements**: Modern browser supporting `fetch`, `AbortController`, `File.slice()`, `webkitdirectory`, and `localStorage` (Chrome, Edge, Firefox, Safari).
 
 ---
 
@@ -140,36 +143,48 @@ All server parameters can be customized via environment variables:
 | `UPLOAD_CACHE_TIMEOUT` | `21600` | Seconds | Inactivity duration before an abandoned cache is purged (Default: 6 hours). |
 | `CLEANUP_INTERVAL` | `1800` | Seconds | Frequency at which the cleanup worker scans for expired caches (Default: 30 minutes). |
 
-### Example Configuration:
-
-**PowerShell (Windows)**:
-```powershell
-$env:PORT="8080"
-$env:DEFAULT_CHUNK_SIZE="8388608"      # 8 MB chunks
-python Quickshare.py
-```
-
-**Bash / Zsh (Linux / macOS)**:
-```bash
-export PORT=8080
-export DEFAULT_CHUNK_SIZE=8388608
-python3 Quickshare.py
-```
-
 ---
 
 ## 8. REST API Endpoints
 
-### 1. Start Upload Session
+### 1. Start Folder Upload Session
+- **URL**: `POST /folder/upload/start`
+- **Headers**: `Content-Type: application/json`
+- **Request Body**:
+  ```json
+  {
+    "folder_name": "MyProject",
+    "total_files": 3,
+    "total_size": 52428800,
+    "files": [
+      { "relative_path": "README.md", "size": 1024 },
+      { "relative_path": "src/main.py", "size": 2048 },
+      { "relative_path": "assets/logo.png", "size": 52425728 }
+    ]
+  }
+  ```
+- **Response (201 Created)**:
+  ```json
+  {
+    "success": true,
+    "folder_id": "9000dd3a-9295-49a3-9c96-9ccbccde9f5d",
+    "folder_name": "MyProject",
+    "total_files": 3,
+    "total_size": 52428800
+  }
+  ```
+
+### 2. Start File Upload Session (Standalone or Folder Sub-File)
 - **URL**: `POST /upload/start`
 - **Headers**: `Content-Type: application/json`
 - **Request Body**:
   ```json
   {
-    "filename": "archive.zip",
-    "total_size": 104857600,
+    "filename": "main.py",
+    "total_size": 2048,
     "chunk_size": 8388608,
-    "file_hash": "optional_sha256_hash"
+    "folder_id": "9000dd3a-9295-49a3-9c96-9ccbccde9f5d",
+    "relative_path": "src/main.py"
   }
   ```
 - **Response (201 Created)**:
@@ -178,12 +193,12 @@ python3 Quickshare.py
     "success": true,
     "upload_id": "4b684534-1299-4c5b-801b-5e92c2df6d84",
     "chunk_size": 8388608,
-    "total_chunks": 13,
+    "total_chunks": 1,
     "status": "uploading"
   }
   ```
 
-### 2. Upload Single Chunk
+### 3. Upload Single Chunk
 - **URL**: `POST /upload/chunk`
 - **Content-Type**: `multipart/form-data`
 - **Form Fields**:
@@ -200,28 +215,8 @@ python3 Quickshare.py
     "received_count": 1
   }
   ```
-- **Error Codes**: `400` (Bad chunk bounds or size mismatch), `404` (Upload not found), `409` (Assembly already in progress).
 
-### 3. Query Upload Status (Resume)
-- **URL**: `GET /upload/status/<upload_id>`
-- **Response (200 OK)**:
-  ```json
-  {
-    "success": true,
-    "upload_id": "4b684534-1299-4c5b-801b-5e92c2df6d84",
-    "filename": "archive.zip",
-    "safe_filename": "archive.zip",
-    "total_size": 104857600,
-    "chunk_size": 8388608,
-    "total_chunks": 13,
-    "received_chunks": [0, 1, 2],
-    "missing_chunks": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-    "next_chunk": 3,
-    "status": "uploading"
-  }
-  ```
-
-### 4. Complete & Verify Upload
+### 4. Complete File Upload
 - **URL**: `POST /upload/complete`
 - **Headers**: `Content-Type: application/json`
 - **Request Body**: `{"upload_id": "4b684534-1299-4c5b-801b-5e92c2df6d84"}`
@@ -229,28 +224,63 @@ python3 Quickshare.py
   ```json
   {
     "success": true,
-    "filename": "archive.zip",
-    "size": 104857600,
-    "sha256": "3a7bd3e2360a3d29eea436fcfb7e44c735d117c42d1c1835420b6b9942dd4f1b",
-    "message": "archive.zip uploaded and verified successfully"
+    "filename": "main.py",
+    "size": 2048,
+    "sha256": "d79a8bbd00970f3dd5fa77381a74cd0dfcaa8f4e6f3db97ed3dc2be2233fc147"
   }
   ```
 
-### 5. Cancel Upload
-- **URL**: `POST /upload/cancel/<upload_id>` or `DELETE /upload/<upload_id>`
+### 5. Finalize & Publish Folder
+- **URL**: `POST /folder/upload/complete`
+- **Headers**: `Content-Type: application/json`
+- **Request Body**: `{"folder_id": "9000dd3a-9295-49a3-9c96-9ccbccde9f5d"}`
 - **Response (200 OK)**:
   ```json
   {
     "success": true,
-    "message": "Upload cancelled and cache purged successfully"
+    "folder_name": "MyProject",
+    "total_files": 3,
+    "total_size": 52428800,
+    "message": "Folder MyProject uploaded and published successfully"
   }
   ```
 
-### 6. Download Completed File
-- **URL**: `GET /download/<filename>`
-- **Response**: Binary file stream with HTTP Range support (`206 Partial Content`) and `Content-Disposition: attachment`.
+### 6. Cancel Folder Upload
+- **URL**: `POST /folder/upload/cancel/<folder_id>` or `DELETE /folder/upload/cancel/<folder_id>`
+- **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "message": "Folder upload cancelled and cache purged"
+  }
+  ```
 
-### 7. LAN QR Code
+### 7. Explore Folder Contents
+- **URL**: `GET /folder/contents/<path:folder_path>`
+- **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "current_path": "MyProject",
+    "breadcrumbs": [
+      { "name": "MyProject", "path": "MyProject" }
+    ],
+    "items": [
+      { "name": "src", "relative_path": "MyProject/src", "is_folder": true, "file_count": 1, "size": 2048, "size_str": "2.0 KB" },
+      { "name": "README.md", "relative_path": "MyProject/README.md", "is_folder": false, "size": 1024, "size_str": "1.0 KB" }
+    ]
+  }
+  ```
+
+### 8. Download Folder as ZIP
+- **URL**: `GET /download/zip/<path:folder_name>`
+- **Response**: Streaming ZIP archive (`application/zip`) containing the full directory structure with `Content-Disposition: attachment; filename="MyProject.zip"`.
+
+### 9. Download File (Root or Nested)
+- **URL**: `GET /download/<path:filepath>`
+- **Response**: Binary file stream supporting HTTP Range requests (`206 Partial Content`) and `Content-Disposition: attachment`.
+
+### 10. LAN QR Code
 - **URL**: `GET /qr`
 - **Response**: SVG QR Code image (`image/svg+xml`) encoding the primary LAN URL.
 
