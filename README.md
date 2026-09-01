@@ -36,7 +36,7 @@ QuickShare is designed specifically for trusted local network transfers. It does
 - **Browser Session Recovery**: Active upload sessions are tracked in browser `localStorage`. When the page is reloaded, an interrupted upload prompt allows instant resume upon file selection.
 - **Network & Tab Visibility Recovery**: Automatically reconciles missing chunk state with the server when connection is restored or when returning to a backgrounded tab.
 - **Per-Upload Locking (`UploadLockManager`)**: Independent uploads synchronize on their own isolated lock with reference counting, eliminating global thread contention.
-- **Atomic File Operations**: Metadata files and assembled files use atomic file replacement (`os.replace`) to prevent corruption during sudden server stops.
+- **Multi-File Queue & Controlled Concurrency**: Supports selecting or dropping multiple files simultaneously. Enqueues files into independent upload jobs with dedicated progress bars, isolated pause/resume/cancel controls, and controlled concurrency (`MAX_CONCURRENT_FILES = 2`, each with 4 chunk workers) to prevent socket exhaustion.
 - **Professional Categorized UI**: Modern dark theme with file-type icons, instant search, horizontal mobile category filtering (All, Images, Videos, Audio, Documents, Archives, Code, Applications, Other), and zero emojis.
 
 ---

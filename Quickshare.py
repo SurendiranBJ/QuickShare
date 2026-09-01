@@ -926,6 +926,7 @@ UPLOAD_HTML = """
         .badge-cancelled { background: rgba(239, 68, 68, 0.12); color: #f87171; }
         .badge-error { background: rgba(239, 68, 68, 0.12); color: #f87171; }
         .badge-paused { background: rgba(140, 147, 164, 0.12); color: var(--text-secondary); }
+        .badge-queued { background: rgba(140, 147, 164, 0.12); color: var(--text-secondary); }
 
         /* Progress Bar */
         .progress-track {
@@ -1983,7 +1984,10 @@ function resumeSessionFile(event, uploadId) {
     }
 
     dismissSavedSession(uploadId);
-    startChunkedUpload(file, uploadId);
+    const uploader = new ChunkedUploader(file, uploadId);
+    activeUploaders.set(uploader.elementId, uploader);
+    uploadQueue.push(uploader);
+    processUploadQueue();
 }
 
 // ---------------------------------------------------------------------------
@@ -2000,7 +2004,7 @@ class ChunkedUploader {
         this.uploadId = existingUploadId;
         
         this.receivedChunks = new Set();
-        this.status = 'initializing'; // initializing, uploading, paused, assembling, completed, cancelled, error
+        this.status = existingUploadId ? 'uploading' : 'queued'; // queued, initializing, uploading, paused, assembling, completed, cancelled, error
         this.errorMessage = '';
         
         // Strict concurrency control: ONE uploader = ONE active worker group
@@ -2018,8 +2022,10 @@ class ChunkedUploader {
         // Abort controllers for active chunk requests
         this.abortControllers = new Map();
         
-        // Unique DOM card ID
-        this.elementId = 'upload-' + (this.uploadId || 'temp-' + Math.random().toString(36).substr(2, 9));
+        // Unique DOM card ID per job
+        this.elementId = 'upload-' + (this.uploadId || 'job-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36));
+
+        this.renderCard();
     }
 
     renderCard() {
@@ -2039,8 +2045,8 @@ class ChunkedUploader {
                     <div class="transfer-meta">${formatBytes(this.totalSize)} · <span id="${this.elementId}-chunks">0/${this.totalChunks} chunks</span></div>
                 </div>
                 <div class="transfer-actions">
-                    <span class="status-badge badge-uploading" id="${this.elementId}-badge">UPLOADING</span>
-                    <button class="btn btn-sm" id="${this.elementId}-pause-btn" onclick="togglePauseUpload('${this.elementId}')">Pause</button>
+                    <span class="status-badge badge-${this.status}" id="${this.elementId}-badge">${this.status.toUpperCase()}</span>
+                    <button class="btn btn-sm" id="${this.elementId}-pause-btn" onclick="togglePauseUpload('${this.elementId}')" style="${this.status === 'queued' ? 'display:none;' : ''}">Pause</button>
                     <button class="btn btn-sm btn-danger" id="${this.elementId}-cancel-btn" onclick="cancelUpload('${this.elementId}')">Cancel</button>
                 </div>
             </div>
@@ -2049,7 +2055,7 @@ class ChunkedUploader {
             </div>
             <div class="transfer-footer">
                 <span id="${this.elementId}-progress-text">0% · 0 B / ${formatBytes(this.totalSize)}</span>
-                <span id="${this.elementId}-speed-text">-- MB/s · ETA: --</span>
+                <span id="${this.elementId}-speed-text">${this.status === 'queued' ? 'Queued in line...' : '-- MB/s · ETA: --'}</span>
             </div>
         `;
     }
@@ -2118,7 +2124,9 @@ class ChunkedUploader {
 
         // Update ETA & Speed text
         if (speedText) {
-            if (this.status === 'uploading') {
+            if (this.status === 'queued') {
+                speedText.textContent = `Queued in line...`;
+            } else if (this.status === 'uploading') {
                 const remainingBytes = Math.max(0, this.totalSize - this.uploadedBytes);
                 const etaSeconds = this.currentSpeed > 0 ? (remainingBytes / this.currentSpeed) : 0;
                 speedText.textContent = `${formatBytes(this.currentSpeed)}/s · ${formatTime(etaSeconds)} remaining`;
@@ -2144,6 +2152,8 @@ class ChunkedUploader {
         if (pauseBtn) {
             if (this.status === 'completed' || this.status === 'cancelled' || this.status === 'assembling') {
                 pauseBtn.style.display = 'none';
+            } else if (this.status === 'queued') {
+                pauseBtn.style.display = 'none';
             } else if (this.status === 'error') {
                 pauseBtn.style.display = 'inline-block';
                 pauseBtn.textContent = 'Retry';
@@ -2163,8 +2173,9 @@ class ChunkedUploader {
     }
 
     async start() {
-        this.renderCard();
+        if (this.status === 'uploading' || this.status === 'assembling' || this.status === 'completed' || this.status === 'cancelled') return;
         this.status = 'uploading';
+        this.errorMessage = '';
         this.updateUI();
 
         try {
@@ -2240,19 +2251,18 @@ class ChunkedUploader {
                 this.status = 'completed';
                 removeUploadSession(this.uploadId);
                 this.updateUI();
-                showToast("File uploaded successfully");
-
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1000);
+                showToast(`Uploaded: ${this.filename}`);
+                checkAllUploadsFinished();
             }
 
         } catch (err) {
             if (this.status === 'cancelled' || this.status === 'paused') return;
-            console.error("Upload error:", err);
+            console.error(`Upload error for ${this.filename}:`, err);
             this.status = 'error';
             this.errorMessage = err.message || "Network error occurred";
             this.updateUI();
+        } finally {
+            processUploadQueue();
         }
     }
 
@@ -2303,7 +2313,7 @@ class ChunkedUploader {
                 this.status = 'completed';
                 removeUploadSession(this.uploadId);
                 this.updateUI();
-                setTimeout(() => location.reload(), 1000);
+                checkAllUploadsFinished();
                 return;
             }
 
@@ -2321,7 +2331,8 @@ class ChunkedUploader {
                     this.status = 'completed';
                     removeUploadSession(this.uploadId);
                     this.updateUI();
-                    setTimeout(() => location.reload(), 1000);
+                    showToast(`Uploaded: ${this.filename}`);
+                    checkAllUploadsFinished();
                 } else {
                     this.status = 'error';
                     this.errorMessage = completeData.error || "Assembly failed";
@@ -2353,7 +2364,8 @@ class ChunkedUploader {
                         this.status = 'completed';
                         removeUploadSession(this.uploadId);
                         this.updateUI();
-                        setTimeout(() => location.reload(), 1000);
+                        showToast(`Uploaded: ${this.filename}`);
+                        checkAllUploadsFinished();
                     } else {
                         this.status = 'error';
                         this.errorMessage = completeData.error || "Assembly failed";
@@ -2365,7 +2377,7 @@ class ChunkedUploader {
             }
 
         } catch (err) {
-            console.warn("Reconciliation network error:", err);
+            console.warn(`Reconciliation error for ${this.filename}:`, err);
             if (isUserResume) {
                 this.status = 'error';
                 this.errorMessage = "Network reconnection failed. Please retry.";
@@ -2373,6 +2385,7 @@ class ChunkedUploader {
             }
         } finally {
             this.isReconciling = false;
+            processUploadQueue();
         }
     }
 
@@ -2400,10 +2413,10 @@ class ChunkedUploader {
                     return;
                 }
                 const now = Date.now();
-                const elapsed = (now - this.lastSpeedCheck) / 1000;
-                if (elapsed > 0.4) {
-                    const instantSpeed = this.bytesSinceLastCheck / elapsed;
-                    this.currentSpeed = this.currentSpeed === 0 ? Math.round(instantSpeed) : Math.round(0.7 * instantSpeed + 0.3 * this.currentSpeed);
+                const elapsedSec = (now - this.lastSpeedCheck) / 1000.0;
+                if (elapsedSec >= 0.35) {
+                    const instantSpeed = this.bytesSinceLastCheck / elapsedSec;
+                    this.currentSpeed = (this.currentSpeed === 0) ? instantSpeed : (0.7 * this.currentSpeed + 0.3 * instantSpeed);
                     this.bytesSinceLastCheck = 0;
                     this.lastSpeedCheck = now;
                     this.requestUIUpdate();
@@ -2414,8 +2427,10 @@ class ChunkedUploader {
                 workers.push((async () => {
                     while (queue.length > 0 && this.status === 'uploading' && this.uploadGeneration === currentGen) {
                         const chunkIndex = queue.shift();
-                        let success = false;
+                        if (chunkIndex === undefined) break;
+
                         let retries = 0;
+                        let success = false;
 
                         while (!success && retries < MAX_CHUNK_RETRIES && this.status === 'uploading' && this.uploadGeneration === currentGen) {
                             try {
@@ -2426,7 +2441,7 @@ class ChunkedUploader {
                             } catch (err) {
                                 if (this.status !== 'uploading' || this.uploadGeneration !== currentGen) break;
                                 retries++;
-                                console.warn(`Retry ${retries}/${MAX_CHUNK_RETRIES} for chunk ${chunkIndex}:`, err);
+                                console.warn(`Retry ${retries}/${MAX_CHUNK_RETRIES} for ${this.filename} chunk ${chunkIndex}:`, err);
                                 await new Promise(r => setTimeout(r, Math.min(600 * Math.pow(1.5, retries), 5000)));
                             }
                         }
@@ -2494,11 +2509,16 @@ class ChunkedUploader {
         this.abortControllers.clear();
         this.updateUI();
         showToast("Transfer paused");
+        processUploadQueue();
     }
 
     resume() {
+        if (this.status !== 'paused' && this.status !== 'error') return;
+        this.status = 'queued';
+        this.errorMessage = '';
+        this.updateUI();
         showToast("Resuming transfer");
-        return this.reconcileAndResume(true);
+        processUploadQueue();
     }
 
     async cancel() {
@@ -2522,26 +2542,80 @@ class ChunkedUploader {
 
         this.updateUI();
         showToast("Transfer cancelled");
+        processUploadQueue();
+        checkAllUploadsFinished();
     }
 }
 
 // ---------------------------------------------------------------------------
-// UI Event Handlers & Visibility Lifecycle
+// Multi-File Queue Manager & UI Event Handlers
 // ---------------------------------------------------------------------------
+const MAX_CONCURRENT_FILES = 2;
+let uploadQueue = [];
+
+function processUploadQueue() {
+    let activeCount = 0;
+    activeUploaders.forEach(uploader => {
+        if (uploader.status === 'uploading' || uploader.status === 'assembling') {
+            activeCount++;
+        }
+    });
+
+    while (activeCount < MAX_CONCURRENT_FILES) {
+        const nextUploader = uploadQueue.find(u => u.status === 'queued');
+        if (!nextUploader) break;
+        activeCount++;
+        nextUploader.start();
+    }
+}
+
+function checkAllUploadsFinished() {
+    let hasPending = false;
+    let completedCount = 0;
+    activeUploaders.forEach(u => {
+        if (u.status === 'uploading' || u.status === 'assembling' || u.status === 'queued') {
+            hasPending = true;
+        }
+        if (u.status === 'completed') {
+            completedCount++;
+        }
+    });
+
+    if (!hasPending && completedCount > 0) {
+        setTimeout(() => {
+            window.location.reload();
+        }, 1200);
+    }
+}
+
+function enqueueFiles(fileList) {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (!file) continue;
+        const uploader = new ChunkedUploader(file);
+        activeUploaders.set(uploader.elementId, uploader);
+        uploadQueue.push(uploader);
+    }
+
+    processUploadQueue();
+}
+
 function handleFileSelection(event) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
-
-    for (let i = 0; i < files.length; i++) {
-        startChunkedUpload(files[i]);
-    }
+    const fileArray = Array.from(files);
     event.target.value = '';
+    enqueueFiles(fileArray);
 }
 
 function startChunkedUpload(file, existingUploadId = null) {
     const uploader = new ChunkedUploader(file, existingUploadId);
     activeUploaders.set(uploader.elementId, uploader);
-    uploader.start();
+    uploadQueue.push(uploader);
+    processUploadQueue();
 }
 
 function cancelUpload(elementId) {
@@ -2556,7 +2630,7 @@ function togglePauseUpload(elementId) {
     if (uploader) {
         if (uploader.status === 'paused' || uploader.status === 'error') {
             uploader.resume();
-        } else {
+        } else if (uploader.status === 'uploading') {
             uploader.pause();
         }
     }
@@ -2584,9 +2658,8 @@ dropzone.addEventListener('drop', (e) => {
     const dt = e.dataTransfer;
     const files = dt.files;
     if (files && files.length > 0) {
-        for (let i = 0; i < files.length; i++) {
-            startChunkedUpload(files[i]);
-        }
+        const fileArray = Array.from(files);
+        enqueueFiles(fileArray);
     }
 });
 
@@ -2598,6 +2671,7 @@ document.addEventListener('visibilitychange', () => {
                 uploader.reconcileAndResume(false);
             }
         });
+        processUploadQueue();
     }
 });
 
@@ -2609,6 +2683,7 @@ window.addEventListener('online', () => {
             uploader.reconcileAndResume(false);
         }
     });
+    processUploadQueue();
 });
 
 window.addEventListener('offline', () => {
