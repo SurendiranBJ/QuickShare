@@ -131,23 +131,40 @@ def get_lan_ip():
             return '127.0.0.1'
 
 def generate_qr_svg(url):
-    """Generates a clean SVG QR code string."""
+    """
+    Generates a clean, self-contained, 100% valid SVG QR code string.
+    Includes a crisp white background, black modules with border/quiet zone,
+    and responsive viewBox (width="100%" height="100%").
+    Works completely offline with zero external dependencies.
+    """
     try:
         import qrcode
-        import qrcode.image.svg
         qr = qrcode.QRCode(
-            version=1,
-            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            version=None,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
             box_size=10,
-            border=1,
-            image_factory=qrcode.image.svg.SvgPathImage
+            border=3
         )
         qr.add_data(url)
         qr.make(fit=True)
-        img = qr.make_image(fill_color='black', back_color='white')
-        out = io.BytesIO()
-        img.save(out)
-        return out.getvalue().decode('utf-8')
+        matrix = qr.get_matrix()
+        size = len(matrix)
+        
+        path_segments = []
+        for r_idx, row in enumerate(matrix):
+            for c_idx, val in enumerate(row):
+                if val:
+                    path_segments.append(f"M{c_idx},{r_idx}h1v1h-1z")
+        
+        path_data = "".join(path_segments)
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" '
+            f'width="100%" height="100%" shape-rendering="crispEdges">'
+            f'<rect width="{size}" height="{size}" fill="#ffffff"/>'
+            f'<path d="{path_data}" fill="#000000"/>'
+            f'</svg>'
+        )
+        return svg
     except Exception as e:
         logger.warning(f"QR code generation failed or qrcode package unavailable: {e}")
         return None
@@ -1286,20 +1303,29 @@ UPLOAD_HTML = """
 
         .qr-card {
             background: #ffffff;
-            padding: 0.85rem;
+            padding: 0.75rem;
             border-radius: var(--radius-md);
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 210px;
-            height: 210px;
+            width: 220px;
+            height: 220px;
             max-width: 100%;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
         }
 
         .qr-card svg, .qr-card img {
             width: 100%;
             height: 100%;
+            display: block;
+        }
+
+        .qr-unavailable-text {
+            color: #545b6d;
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-align: center;
         }
 
         .modal-url-box {
@@ -1657,11 +1683,11 @@ UPLOAD_HTML = """
             Scan this QR code with your phone camera or open the address in any browser
         </div>
 
-        <div class="qr-card">
+        <div class="qr-card" id="qrContainer">
             {% if qr_svg %}
                 {{ qr_svg|safe }}
             {% else %}
-                <img src="/qr" alt="Scan QR code to connect" style="width:100%; height:100%;">
+                <div class="qr-unavailable-text">QR code unavailable</div>
             {% endif %}
         </div>
 
