@@ -411,7 +411,10 @@ def load_metadata(upload_id):
     try:
         with open(meta_path, "r", encoding="utf-8") as f:
             data = json.load(f)
+            # Normalize sets for in-memory use
             data["received_chunks"] = set(data.get("received_chunks", []))
+            # in_flight_chunks tracks reservations made during Phase A
+            data["in_flight_chunks"] = set(data.get("in_flight_chunks", []))
             upload_lock_manager.set_cached_meta(upload_id, data)
             return data
     except Exception as e:
@@ -430,8 +433,11 @@ def save_metadata(upload_id, metadata, write_disk=True):
     tmp_path = f"{meta_path}.tmp_{uuid.uuid4().hex[:6]}"
     try:
         serializable = metadata.copy()
+        # Serialize sets to lists for disk persistence
         if isinstance(serializable.get("received_chunks"), (set, list)):
             serializable["received_chunks"] = sorted(list(serializable["received_chunks"]))
+        if isinstance(serializable.get("in_flight_chunks"), (set, list)):
+            serializable["in_flight_chunks"] = sorted(list(serializable["in_flight_chunks"]))
         
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(serializable, f, indent=2)
@@ -2715,6 +2721,7 @@ def upload_start():
         "chunk_size": chunk_size,
         "total_chunks": total_chunks,
         "received_chunks": set(),
+        "in_flight_chunks": set(),
         "file_hash": file_hash,
         "created_at": time.time(),
         "updated_at": time.time(),
@@ -2789,35 +2796,127 @@ def upload_chunk():
     chunk_path = os.path.join(chunks_dir, chunk_filename)
     temp_chunk_path = f"{chunk_path}.tmp_{uuid.uuid4().hex[:6]}"
 
-    # Lock-free binary disk write to temporary chunk path
+    # -----------------------
+    # PHASE A - SHORT LOCK: reserve chunk index
+    # -----------------------
+    try:
+        with upload_lock_manager.acquire(upload_id):
+            # Reload authoritative metadata under lock
+            metadata = load_metadata(upload_id)
+            if not metadata:
+                return jsonify({"success": False, "error": "Upload session metadata not found"}), 404
+
+            current_status = metadata.get("status")
+            if current_status == "assembling":
+                return jsonify({"success": False, "error": "Upload assembly is already in progress"}), 409
+            if current_status in ["cancelled", "completed", "failed"]:
+                return jsonify({"success": False, "error": f"Upload session is {current_status}"}), 400
+
+            # Idempotent fast path: already recorded as received
+            if chunk_index in metadata.get("received_chunks", set()):
+                return jsonify({"success": True, "upload_id": upload_id, "chunk_index": chunk_index, "received_count": len(metadata.get("received_chunks", []))}), 200
+
+            # Reserve as in-flight so upload_complete can account for it
+            inflight = metadata.get("in_flight_chunks") or set()
+            inflight.add(chunk_index)
+            metadata["in_flight_chunks"] = inflight
+            metadata["updated_at"] = time.time()
+            # Persist reservation in-memory; avoid disk write during hot loop
+            save_metadata(upload_id, metadata, write_disk=False)
+    except Exception as e:
+        logger.error(f"Error reserving chunk {chunk_index} for upload_id={upload_id}: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
+    # -----------------------
+    # PHASE B - NO LOCK: write chunk to disk
+    # -----------------------
+    write_error = None
     try:
         chunk_file.save(temp_chunk_path)
         actual_chunk_size = os.path.getsize(temp_chunk_path)
 
         if actual_chunk_size != expected_chunk_size:
-            os.remove(temp_chunk_path)
-            return jsonify({
-                "success": False,
-                "error": f"Chunk size mismatch: expected {expected_chunk_size} B, got {actual_chunk_size} B"
-            }), 400
-
-        # Atomic replace for chunk file (idempotent overwrite if retried)
-        os.replace(temp_chunk_path, chunk_path)
-
-        # Micro-second lock to update received set in memory
-        with upload_lock_manager.acquire(upload_id):
-            metadata["received_chunks"].add(chunk_index)
-            metadata["updated_at"] = time.time()
-            save_metadata(upload_id, metadata, write_disk=False)
-
-    except Exception as e:
-        if os.path.exists(temp_chunk_path):
+            write_error = (400, {"success": False, "error": f"Chunk size mismatch: expected {expected_chunk_size} B, got {actual_chunk_size} B"})
             try:
                 os.remove(temp_chunk_path)
             except OSError:
                 pass
+        else:
+            # Atomic replace for chunk file (idempotent overwrite if retried)
+            os.replace(temp_chunk_path, chunk_path)
+    except Exception as e:
         logger.error(f"Error saving chunk {chunk_index} for upload_id={upload_id}: {e}")
-        return jsonify({"success": False, "error": "Internal error storing chunk"}), 500
+        write_error = (500, {"success": False, "error": "Internal error storing chunk"})
+
+    # If write failed, remove reservation and respond
+    if write_error is not None:
+        try:
+            with upload_lock_manager.acquire(upload_id):
+                meta = load_metadata(upload_id)
+                if meta and "in_flight_chunks" in meta and chunk_index in meta["in_flight_chunks"]:
+                    meta["in_flight_chunks"].discard(chunk_index)
+                    meta["updated_at"] = time.time()
+                    save_metadata(upload_id, meta, write_disk=False)
+        except Exception:
+            pass
+        return jsonify(write_error[1]), write_error[0]
+
+    # -----------------------
+    # PHASE C - SHORT LOCK: finalize reservation -> received
+    # -----------------------
+    try:
+        with upload_lock_manager.acquire(upload_id):
+            meta = load_metadata(upload_id)
+            if not meta:
+                # Clean up written chunk if metadata vanished
+                try:
+                    os.remove(chunk_path)
+                except OSError:
+                    pass
+                return jsonify({"success": False, "error": "Upload session metadata not found"}), 404
+
+            if meta.get("status") == "cancelled":
+                # Cancel wins; remove chunk and reservation
+                try:
+                    if os.path.exists(chunk_path):
+                        os.remove(chunk_path)
+                except OSError:
+                    pass
+                if "in_flight_chunks" in meta:
+                    meta["in_flight_chunks"].discard(chunk_index)
+                    meta["updated_at"] = time.time()
+                    save_metadata(upload_id, meta, write_disk=False)
+                return jsonify({"success": False, "error": "Upload was cancelled"}), 400
+
+            # If another concurrent finalizer already recorded it, just clear in-flight
+            if chunk_index in meta.get("received_chunks", set()):
+                if "in_flight_chunks" in meta:
+                    meta["in_flight_chunks"].discard(chunk_index)
+                    meta["updated_at"] = time.time()
+                    save_metadata(upload_id, meta, write_disk=False)
+                return jsonify({"success": True, "upload_id": upload_id, "chunk_index": chunk_index, "received_count": len(meta.get("received_chunks", []))}), 200
+
+            # Mark chunk as fully received
+            recv = meta.get("received_chunks") or set()
+            recv.add(chunk_index)
+            meta["received_chunks"] = recv
+            if "in_flight_chunks" in meta:
+                meta["in_flight_chunks"].discard(chunk_index)
+            meta["updated_at"] = time.time()
+            save_metadata(upload_id, meta, write_disk=False)
+    except Exception as e:
+        logger.error(f"Error finalizing chunk {chunk_index} for upload_id={upload_id}: {e}")
+        # Best-effort cleanup of temp and in-flight state
+        try:
+            with upload_lock_manager.acquire(upload_id):
+                meta = load_metadata(upload_id)
+                if meta and "in_flight_chunks" in meta:
+                    meta["in_flight_chunks"].discard(chunk_index)
+                    meta["updated_at"] = time.time()
+                    save_metadata(upload_id, meta, write_disk=False)
+        except Exception:
+            pass
+        return jsonify({"success": False, "error": "Internal error finalizing chunk"}), 500
 
     logger.debug(f"CHUNK RECEIVED: upload_id={upload_id}, chunk={chunk_index}/{metadata['total_chunks']-1}, received_total={len(metadata['received_chunks'])}")
     return jsonify({
@@ -2912,11 +3011,12 @@ def upload_complete():
         total_chunks = metadata["total_chunks"]
         expected_size = metadata["total_size"]
 
-        # Verify all expected chunk files exist on disk
+        # Verify all expected chunk files exist on disk OR are reserved as in-flight
+        inflight = metadata.get("in_flight_chunks", set())
         missing_chunks = []
         for i in range(total_chunks):
             chunk_path = os.path.join(chunks_dir, f"{i:06d}")
-            if not os.path.exists(chunk_path):
+            if not os.path.exists(chunk_path) and i not in inflight:
                 missing_chunks.append(i)
 
         if missing_chunks:
@@ -2926,11 +3026,13 @@ def upload_complete():
                 "missing_chunks": missing_chunks
             }), 400
 
-        # Transition status to assembling
+        # Transition status to assembling and persist
         metadata["status"] = "assembling"
         metadata["updated_at"] = time.time()
         save_metadata(upload_id, metadata, write_disk=True)
-        logger.info(f"ASSEMBLY START: upload_id={upload_id}, total_chunks={total_chunks}, expected_size={expected_size}")
+        # Snapshot in-flight set so we can wait for files without holding the lock
+        snapshot_inflight = set(inflight)
+        logger.info(f"ASSEMBLY START: upload_id={upload_id}, total_chunks={total_chunks}, expected_size={expected_size}, inflight={len(snapshot_inflight)}")
 
     # -------------------------------------------------------------------------
     # PHASE 2: Streaming Assembly & Hashing (NO LOCK HELD - NON-BLOCKING)
@@ -2941,6 +3043,21 @@ def upload_complete():
     assembly_error = None
 
     try:
+        # If there were reserved in-flight chunks at time of transition, wait briefly for their files
+        # to appear on disk so they are included in the streaming pass. This avoids missing a chunk
+        # that was accepted just before assembly began.
+        if snapshot_inflight:
+            WAIT_INFLIGHT_SECONDS = 30
+            wait_start = time.time()
+            missing_now = [i for i in snapshot_inflight if not os.path.exists(os.path.join(chunks_dir, f"{i:06d}"))]
+            while missing_now and (time.time() - wait_start) < WAIT_INFLIGHT_SECONDS:
+                time.sleep(0.1)
+                missing_now = [i for i in snapshot_inflight if not os.path.exists(os.path.join(chunks_dir, f"{i:06d}"))]
+            if missing_now:
+                assembly_error = f"Timed out waiting for {len(missing_now)} in-flight chunk(s) to be written before assembly"
+                logger.error(f"ASSEMBLY IN-FLIGHT TIMEOUT: upload_id={upload_id} missing={missing_now}")
+                raise Exception(assembly_error)
+
         with open(assembled_tmp, "wb") as outfile:
             for i in range(total_chunks):
                 chunk_path = os.path.join(chunks_dir, f"{i:06d}")
