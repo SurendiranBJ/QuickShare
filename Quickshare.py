@@ -2004,7 +2004,7 @@ class ChunkedUploader {
         this.uploadId = existingUploadId;
         
         this.receivedChunks = new Set();
-        this.status = existingUploadId ? 'uploading' : 'queued'; // queued, initializing, uploading, paused, assembling, completed, cancelled, error
+        this.status = 'queued'; // queued, uploading, paused, assembling, completed, cancelled, error
         this.errorMessage = '';
         
         // Strict concurrency control: ONE uploader = ONE active worker group
