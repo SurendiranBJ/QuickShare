@@ -2088,6 +2088,7 @@ const MAX_CHUNK_RETRIES = 5;                                   // Max retry atte
 const STORAGE_KEY = "quickshare_active_uploads";
 
 let activeUploaders = new Map();
+let activeFolderUploaders = new Map();
 let currentCategory = 'all';
 
 // Helper: Format bytes
@@ -2163,6 +2164,7 @@ document.addEventListener('keydown', (e) => {
 // ---------------------------------------------------------------------------
 const categoryLabelMap = {
     'all': 'matching',
+    'folders': 'folder',
     'images': 'image',
     'videos': 'video',
     'audio': 'audio',
@@ -2297,6 +2299,7 @@ function removeUploadSession(uploadId) {
 function checkSavedSessions() {
     const sessions = getSavedUploads();
     const resumeContainer = document.getElementById("resumeContainer");
+    if (!resumeContainer) return;
     resumeContainer.innerHTML = "";
 
     const sessionKeys = Object.keys(sessions);
@@ -2351,7 +2354,6 @@ function resumeSessionFile(event, uploadId) {
     processUploadQueue();
 }
 
-// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Unified Chunked Uploader Implementation (High Throughput & Optimized UI)
 // ---------------------------------------------------------------------------
@@ -2656,10 +2658,6 @@ class ChunkedUploader {
         }
     }
 
-    /**
-     * UNIFIED RECOVERY PIPELINE:
-     * Authoritative single path for network reconnect, visibility change, and manual user resume.
-     */
     async reconcileAndResume(isUserResume = false) {
         if (!this.uploadId || this.isReconciling) return;
         if (this.status === 'completed' || this.status === 'cancelled' || this.status === 'assembling') return;
@@ -3251,7 +3249,7 @@ class FolderUploader {
         if (this.status !== 'uploading') return;
         this.status = 'paused';
         this.childUploaders.forEach(u => {
-            if (u.status === 'uploading') u.pause();
+            if (u.status === 'uploading' || u.status === 'queued') u.pause();
         });
         this.updateUI();
         showToast("Folder upload paused");
@@ -3295,17 +3293,17 @@ const MAX_CONCURRENT_FILES = 2;
 let uploadQueue = [];
 
 function processUploadQueue() {
-    let activeCount = 0;
+    let activeFileCount = 0;
     activeUploaders.forEach(uploader => {
         if (uploader.status === 'uploading' || uploader.status === 'assembling') {
-            activeCount++;
+            activeFileCount++;
         }
     });
 
-    while (activeCount < MAX_CONCURRENT_FILES) {
+    while (activeFileCount < MAX_CONCURRENT_FILES) {
         const nextUploader = uploadQueue.find(u => u.status === 'queued');
         if (!nextUploader) break;
-        activeCount++;
+        activeFileCount++;
         nextUploader.start();
     }
 }
@@ -3313,6 +3311,7 @@ function processUploadQueue() {
 function checkAllUploadsFinished() {
     let hasPending = false;
     let completedCount = 0;
+
     activeUploaders.forEach(u => {
         if (u.status === 'uploading' || u.status === 'assembling' || u.status === 'queued') {
             hasPending = true;
@@ -3322,10 +3321,19 @@ function checkAllUploadsFinished() {
         }
     });
 
+    activeFolderUploaders.forEach(fu => {
+        if (fu.status === 'uploading' || fu.status === 'assembling' || fu.status === 'queued') {
+            hasPending = true;
+        }
+        if (fu.status === 'completed') {
+            completedCount++;
+        }
+    });
+
     if (!hasPending && completedCount > 0) {
         setTimeout(() => {
             window.location.reload();
-        }, 1200);
+        }, 1000);
     }
 }
 
@@ -3389,20 +3397,20 @@ function handleFolderSelection(event) {
 
     folderGroups.forEach((groupFiles, folderName) => {
         const folderUploader = new FolderUploader(folderName, groupFiles);
-        activeUploaders.set(folderUploader.elementId, folderUploader);
+        activeFolderUploaders.set(folderUploader.elementId, folderUploader);
         folderUploader.start();
     });
 }
 
 function toggleFolderDetails(elementId) {
-    const folderUploader = activeUploaders.get(elementId);
+    const folderUploader = activeFolderUploaders.get(elementId);
     if (folderUploader && folderUploader.toggleDetails) {
         folderUploader.toggleDetails();
     }
 }
 
 function togglePauseFolder(elementId) {
-    const folderUploader = activeUploaders.get(elementId);
+    const folderUploader = activeFolderUploaders.get(elementId);
     if (folderUploader) {
         if (folderUploader.status === 'paused' || folderUploader.status === 'error') {
             folderUploader.resume();
@@ -3413,7 +3421,7 @@ function togglePauseFolder(elementId) {
 }
 
 function cancelFolder(elementId) {
-    const folderUploader = activeUploaders.get(elementId);
+    const folderUploader = activeFolderUploaders.get(elementId);
     if (folderUploader) {
         folderUploader.cancel();
     }
@@ -3489,7 +3497,6 @@ async function scanFilesAndDirectories(dataTransfer) {
                 const subFiles = await readEntry(entry, '');
                 const folderName = entry.name;
                 const formatted = subFiles.map(item => {
-                    // strip root folder prefix
                     const parts = item.path.split('/');
                     const rel = parts.length > 1 ? parts.slice(1).join('/') : item.file.name;
                     return { file: item.file, relativePath: rel, size: item.file.size };
@@ -3536,7 +3543,7 @@ dropzone.addEventListener('drop', async (e) => {
         }
         folderGroups.forEach((groupFiles, folderName) => {
             const folderUploader = new FolderUploader(folderName, groupFiles);
-            activeUploaders.set(folderUploader.elementId, folderUploader);
+            activeFolderUploaders.set(folderUploader.elementId, folderUploader);
             folderUploader.start();
         });
     } catch (err) {
@@ -3710,9 +3717,8 @@ window.addEventListener('DOMContentLoaded', () => {
 # REST API Endpoints
 # -----------------------------------------------------------------------------
 
-@app.route('/')
-def index():
-    """Renders the main QuickShare page listing completed files and folders in uploads/ and LAN details."""
+def get_real_uploads_listing():
+    """Authoritative filesystem discovery of real files and directories in uploads/."""
     item_list = []
     if os.path.exists(UPLOAD_DIR):
         try:
@@ -3722,12 +3728,13 @@ def index():
                 full_path = os.path.join(UPLOAD_DIR, fname)
                 if not is_safe_path(UPLOAD_DIR, full_path):
                     continue
-                    
+
                 if os.path.isdir(full_path):
                     folder_size, file_count = get_folder_stats(full_path)
                     stat = os.stat(full_path)
                     item_list.append({
                         "name": fname,
+                        "type": "folder",
                         "is_folder": True,
                         "file_count": file_count,
                         "size": folder_size,
@@ -3746,6 +3753,7 @@ def index():
                     type_info = get_file_type_info(fname)
                     item_list.append({
                         "name": fname,
+                        "type": "file",
                         "is_folder": False,
                         "size": stat.st_size,
                         "size_str": format_bytes(stat.st_size),
@@ -3753,11 +3761,17 @@ def index():
                         "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime("%b %d, %Y"),
                         "type_info": type_info
                     })
-            # Folders first, then files sorted by mtime descending
+            # Real directories first, then files sorted by mtime descending
             item_list.sort(key=lambda x: (not x.get("is_folder", False), -x["mtime"]))
         except Exception as e:
             logger.error(f"Error listing uploads directory: {e}")
-            
+    return item_list
+
+
+@app.route('/')
+def index():
+    """Renders the main QuickShare page listing completed files and folders in uploads/ and LAN details."""
+    item_list = get_real_uploads_listing()
     lan_ip = get_lan_ip()
     lan_url = f"http://{lan_ip}:{PORT}"
     qr_svg = generate_qr_svg(lan_url)
@@ -3771,6 +3785,18 @@ def index():
         qr_svg=qr_svg,
         default_chunk_size=DEFAULT_CHUNK_SIZE
     )
+
+
+@app.route('/api/files', methods=['GET'])
+@app.route('/files', methods=['GET'])
+def api_files_listing():
+    """Returns JSON array of real completed files and folders currently in uploads/."""
+    item_list = get_real_uploads_listing()
+    return jsonify({
+        "success": True,
+        "count": len(item_list),
+        "files": item_list
+    }), 200
 
 
 @app.route('/qr')
@@ -4631,14 +4657,20 @@ def download_folder_zip(folder_name):
                     zf.write(full_file_path, arcname)
 
         def stream_and_remove():
+            file_obj = None
             try:
-                with open(temp_zip_path, 'rb') as f:
-                    while True:
-                        chunk = f.read(64 * 1024)
-                        if not chunk:
-                            break
-                        yield chunk
+                file_obj = open(temp_zip_path, 'rb')
+                while True:
+                    chunk = file_obj.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
             finally:
+                if file_obj:
+                    try:
+                        file_obj.close()
+                    except Exception:
+                        pass
                 try:
                     if os.path.exists(temp_zip_path):
                         os.remove(temp_zip_path)
