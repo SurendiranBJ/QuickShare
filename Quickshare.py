@@ -132,42 +132,42 @@ def get_lan_ip():
             return '127.0.0.1'
 
 def generate_qr_svg(url):
-    """
-    Generates a clean, self-contained, 100% valid SVG QR code string.
-    Includes a crisp white background, black modules with border/quiet zone,
-    and responsive viewBox (width="100%" height="100%").
-    Works completely offline with zero external dependencies.
-    """
+    """Generate a responsive SVG QR code for the supplied QuickShare URL."""
     try:
         import qrcode
+
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            raise ValueError("QR URL must be a valid HTTP(S) URL")
+
         qr = qrcode.QRCode(
             version=None,
             error_correction=qrcode.constants.ERROR_CORRECT_M,
             box_size=10,
-            border=3
+            border=4,
         )
         qr.add_data(url)
         qr.make(fit=True)
         matrix = qr.get_matrix()
         size = len(matrix)
-        
+
         path_segments = []
-        for r_idx, row in enumerate(matrix):
-            for c_idx, val in enumerate(row):
-                if val:
-                    path_segments.append(f"M{c_idx},{r_idx}h1v1h-1z")
-        
+        for row_index, row in enumerate(matrix):
+            for col_index, is_dark in enumerate(row):
+                if is_dark:
+                    path_segments.append(f"M{col_index},{row_index}h1v1h-1z")
+
         path_data = "".join(path_segments)
-        svg = (
-            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" '
-            f'width="100%" height="100%" shape-rendering="crispEdges">'
+        return (
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 {size} {size}" width="100%" height="100%" '
+            f'preserveAspectRatio="xMidYMid meet" shape-rendering="crispEdges" '
+            f'role="img" aria-label="QuickShare connection QR code">'
             f'<rect width="{size}" height="{size}" fill="#ffffff"/>'
             f'<path d="{path_data}" fill="#000000"/>'
             f'</svg>'
         )
-        return svg
-    except Exception as e:
-        logger.warning(f"QR code generation failed or qrcode package unavailable: {e}")
+    except Exception:
+        logger.exception("QuickShare QR generation failed")
         return None
 
 def format_bytes(size_bytes):
@@ -2013,11 +2013,11 @@ UPLOAD_HTML = """
             Scan this QR code with your phone camera or open the address in any browser
         </div>
 
-        <div class="qr-card" id="qrContainer">
+        <div class="qr-card" id="qrContainer" aria-live="polite">
             {% if qr_svg %}
                 {{ qr_svg|safe }}
             {% else %}
-                <div class="qr-unavailable-text">QR code unavailable</div>
+                <div class="qr-unavailable-text">Loading QR code...</div>
             {% endif %}
         </div>
 
@@ -2132,20 +2132,68 @@ function showToast(message) {
 
 // Helper: Copy LAN URL
 function copyLanUrl() {
-    const url = document.getElementById("lanUrlText").textContent;
-    navigator.clipboard.writeText(url).then(() => {
-        const copyText = document.getElementById("copyBtnText");
-        if (copyText) copyText.textContent = "Address copied";
-        showToast("Address copied to clipboard");
-        if (copyText) setTimeout(() => { copyText.textContent = "Copy address"; }, 2000);
-    }).catch(() => {
-        showToast("Address: " + url);
-    });
+    const urlElement = document.getElementById("lanUrlText");
+    if (!urlElement) return;
+    const url = urlElement.textContent.trim();
+    const copyFallback = () => {
+        window.prompt("Copy this QuickShare address:", url);
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(url).then(() => {
+            const copyText = document.getElementById("copyBtnText");
+            if (copyText) copyText.textContent = "Address copied";
+            showToast("Address copied to clipboard");
+            if (copyText) setTimeout(() => { copyText.textContent = "Copy address"; }, 2000);
+        }).catch(copyFallback);
+    } else {
+        copyFallback();
+    }
+}
+
+// Fetch a fresh QR from Flask when opening the device-connect modal.
+// This recovers from a QR generation failure during the initial page render.
+async function refreshQuickShareQR() {
+    const container = document.getElementById("qrContainer");
+    if (!container) return;
+
+    container.innerHTML = '<div class="qr-unavailable-text">Loading QR code...</div>';
+    try {
+        const response = await fetch(`/qr?ts=${Date.now()}`, {
+            method: "GET",
+            cache: "no-store",
+            headers: { "Accept": "image/svg+xml" }
+        });
+        if (!response.ok) {
+            let detail = `HTTP ${response.status}`;
+            try {
+                const errorData = await response.json();
+                if (errorData && errorData.error) detail = errorData.error;
+            } catch (_) {}
+            throw new Error(detail);
+        }
+
+        const svgText = await response.text();
+        if (!svgText.includes("<svg") || !svgText.includes("</svg>")) {
+            throw new Error("The server returned an invalid QR image.");
+        }
+        container.innerHTML = svgText;
+        const svg = container.querySelector("svg");
+        if (svg) {
+            svg.setAttribute("width", "100%");
+            svg.setAttribute("height", "100%");
+            svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        }
+    } catch (error) {
+        console.error("QuickShare QR refresh failed:", error);
+        container.innerHTML = '<div class="qr-unavailable-text">QR code unavailable. Use the address below instead.</div>';
+    }
 }
 
 // Unified Connect Device Modal controls
 function openConnectModal() {
     document.getElementById("connectModal").style.display = "flex";
+    refreshQuickShareQR();
 }
 
 function closeConnectModal(event) {
@@ -3801,14 +3849,18 @@ def api_files_listing():
 
 @app.route('/qr')
 def qr_code_endpoint():
-    """Returns SVG QR code for the current server LAN access URL."""
+    """Return a freshly generated SVG QR code for the current LAN URL."""
     lan_ip = get_lan_ip()
     lan_url = f"http://{lan_ip}:{PORT}"
     svg = generate_qr_svg(lan_url)
-    if svg:
-        return Response(svg, mimetype='image/svg+xml')
-    else:
-        return jsonify({"success": False, "error": "QR generator not available"}), 404
+    if not svg:
+        logger.error("QR endpoint could not generate a QR code for URL %s", lan_url)
+        return jsonify({"success": False, "error": "QR generation failed; check server logs and qrcode installation."}), 500
+
+    response = Response(svg, mimetype='image/svg+xml')
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.route('/folder/upload/start', methods=['POST'])
